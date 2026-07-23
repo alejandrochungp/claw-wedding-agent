@@ -1,6 +1,28 @@
 # Guía de Deploy — claw-wedding-agent
 
 > Basado en la arquitectura probada de `claw-whatsapp-agent` (Softify) en Railway.
+> **Última actualización:** 23-Jul-2026
+
+## 📊 Estado Actual
+
+| Componente | Estado | Detalle |
+|-----------|--------|--------|
+| Repo GitHub | ✅ | `softifycl/claw-wedding-agent` (17 archivos, 1609 líneas) |
+| Railway Service | ✅ | Creado: `claw-wedding-agent` (ID: `28d3d063-4925-4988-8157-7181e83ab563`) |
+| Railway Project | ✅ | `claw-whatsapp-webook` (`c43915bc-24a0-4987-b8d1-d23a9dddc565`) |
+| GitHub ↔ Railway | ⚠️ | Railway GitHub App no ve `softifycl` org — requiere verificación email |
+| Meta App | ❌ | Pendiente crear en developers.facebook.com |
+| Redis | ✅ | Ya existe en el proyecto (`redis-volume`) |
+| Sitio Web | ❌ | Pendiente GitHub Pages |
+
+### ⚠️ Bloqueante: Conexión GitHub ↔ Railway
+
+Railway GitHub App solo ve repos de `alejandrochungp`. Para conectar `softifycl/claw-wedding-agent`:
+1. Alejandro debe verificar email de GitHub (sudo mode) en `github.com/settings/installations/114756659`
+2. Grant access a la org `softifycl`
+3. Refresh repo list en Railway → aparecerá `softifycl/claw-wedding-agent`
+
+**Workaround express:** Pushear repo también a `alejandrochungp/claw-wedding-agent` (visible inmediatamente en Railway).
 
 ## 📋 Prerrequisitos
 
@@ -22,8 +44,10 @@ git add .
 git commit -m "Initial commit: wedding planner agent scaffolding"
 
 # Crear repo en GitHub (via gh CLI o web)
-gh repo create claw-wedding-agent --public
-git remote add origin https://github.com/alejandrochungp/claw-wedding-agent.git
+gh repo create softifycl/claw-wedding-agent --public
+# O alternativamente:
+gh repo create alejandrochungp/claw-wedding-agent --public
+git remote add origin https://github.com/softifycl/claw-wedding-agent.git
 git push -u origin master
 ```
 

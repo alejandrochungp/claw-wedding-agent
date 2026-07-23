@@ -115,8 +115,9 @@ wedding-planner/
 ## 📋 Roadmap
 
 ### Fase 1 — Fundación (Sprint 1)
-- [ ] Crear repo GitHub: `claw-wedding-agent`
-- [ ] Deploy en Railway (fork inicial del agente base)
+- [x] Crear repo GitHub: `softifycl/claw-wedding-agent` (17 archivos, 1609 líneas)
+- [x] Railway: servicio `claw-wedding-agent` creado (ID: `28d3d063`) en proyecto `claw-whatsapp-webook`
+- [~] Conectar GitHub ↔ Railway (bloqueado: GitHub App no ve org `softifycl`, requiere verificación email)
 - [ ] Configurar WABA + número eSIM
 - [ ] Crear y aprobar templates Meta (Save the Date + Invitación)
 - [ ] Sitio web estático base (HTML/CSS template nupcial)
