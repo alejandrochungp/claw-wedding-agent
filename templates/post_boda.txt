@@ -1,0 +1,21 @@
+# Template: post_boda
+# Categoría: MARKETING
+# Flujo: Día después → agradecimiento + fotos
+
+---BODY---
+Gracias {{1}} por acompañarnos en el día más feliz de nuestras vidas ❤️
+
+Las fotos oficiales estarán disponibles aquí:
+🔗 {{2}}
+
+Con cariño,
+{{3}} & {{4}} 💑
+
+---BUTTONS---
+[URL] 📸 Ver fotos → {SITE_URL}/galeria
+
+---VARIABLES---
+{{1}} = Nombre del invitado
+{{2}} = URL de la galería de fotos
+{{3}} = Nombre novio 1
+{{4}} = Nombre novio 2

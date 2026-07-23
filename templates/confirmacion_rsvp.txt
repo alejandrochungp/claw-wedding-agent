@@ -1,0 +1,23 @@
+# Template: confirmacion_rsvp
+# Categoría: UTILITY
+# Flujo: Post-RSVP → confirmación recibida
+
+---BODY---
+¡Gracias {{1}}! 🎉
+
+Tu asistencia está confirmada:
+👥 {{2}} persona(s)
+🥗 Preferencia: {{3}}
+🪑 Mesa: {{4}}
+
+Nos vemos el {{5}} de {{6}}. ¡Será inolvidable! ✨
+
+¿Necesitas algo más? Responde a este mensaje.
+
+---VARIABLES---
+{{1}} = Nombre del invitado
+{{2}} = Número de acompañantes + el invitado
+{{3}} = Restricción alimentaria o "Sin restricciones"
+{{4}} = Número y nombre de mesa
+{{5}} = Día (número) de la boda
+{{6}} = Mes de la boda

@@ -1,0 +1,22 @@
+# Template: recordatorio_24h
+# Categoría: UTILITY
+# Flujo: 24 horas antes → checklist
+
+---BODY---
+⏰ ¡Mañana es el gran día, {{1}}! 💒
+
+Checklist último minuto:
+✅ Ropa lista según dress code
+✅ Regalo/sorpresa preparado
+✅ Llegar con anticipación (cóctel {{2}} hrs)
+
+📍 {{3}}
+🪑 Tu mesa: {{4}}
+
+¡No podemos esperar a verte! 🎉
+
+---VARIABLES---
+{{1}} = Nombre del invitado
+{{2}} = Hora del cóctel (ej: 18:00)
+{{3}} = Dirección completa
+{{4}} = Número de mesa

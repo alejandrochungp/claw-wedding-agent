@@ -1,0 +1,31 @@
+# Template: save_the_date
+# Categoría: MARKETING
+# Flujo: Save the Date → espera confirmación recepción
+
+---HEADER---
+IMAGE: {SAVE_THE_DATE_IMAGE_URL}
+# Imagen del Save the Date generada con openai/gpt-image-2
+
+---BODY---
+💍 {{1}} & {{2}}
+
+¡Nos casamos!
+
+🗓 {{3}} de {{4}} de {{5}}
+🕕 {{6}} hrs
+📍 {{7}}
+
+Reserva la fecha — pronto llegará tu invitación formal ✨
+
+---BUTTONS---
+[URL] 📅 Agregar al calendario → {CALENDAR_URL}
+[QUICK_REPLY] ✅ Recibido
+
+---VARIABLES---
+{{1}} = Nombre novio 1
+{{2}} = Nombre novio 2
+{{3}} = Día (número)
+{{4}} = Mes (texto)
+{{5}} = Año
+{{6}} = Hora
+{{7}} = Lugar + ciudad

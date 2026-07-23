@@ -1,0 +1,23 @@
+# Template: info_adicional
+# Categoría: UTILITY
+# Flujo: Consulta del invitado → respuesta automática
+
+---BODY---
+Hola {{1}}, aquí tienes la info que necesitas:
+
+📍 Lugar: {{2}}
+🗓 Fecha: {{3}} de {{4}}
+🕕 Hora: {{5}}
+👔 Dress code: {{6}}
+🎁 Regalos: {{7}}
+
+¿Algo más en que pueda ayudarte?
+
+---VARIABLES---
+{{1}} = Nombre del invitado
+{{2}} = Dirección del lugar
+{{3}} = Día (número)
+{{4}} = Mes
+{{5}} = Hora
+{{6}} = Dress code
+{{7}} = Link a /regalos

@@ -1,0 +1,33 @@
+{
+  "name": "claw-wedding-agent",
+  "version": "1.0.0",
+  "description": "WhatsApp bot agent for wedding planning — Save the Date, RSVP, reminders, invitations",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "templates:create": "node scripts/create_templates.js",
+    "campaign:test": "node scripts/test_campaign.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "redis": "^4.6.0",
+    "dotenv": "^16.3.1",
+    "@slack/webhook": "^7.0.0",
+    "crypto": "^1.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alejandrochungp/claw-wedding-agent.git"
+  },
+  "keywords": ["whatsapp", "wedding", "bot", "meta-api", "railway"],
+  "author": "Alejandro Chung",
+  "license": "UNLICENSED"
+}

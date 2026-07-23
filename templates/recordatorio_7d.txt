@@ -1,0 +1,31 @@
+# Template: recordatorio_7d
+# Categoría: UTILITY
+# Flujo: 7 días antes → info final
+
+---BODY---
+⏰ ¡Falta 1 semana, {{1}}!
+
+La boda de {{2}} & {{3}} es este {{4}} {{5}}.
+
+📋 Info importante:
+👔 Dress code: {{6}}
+📍 Lugar: {{7}}
+🅿️ Estacionamiento: {{8}}
+🌤 Clima: {{9}}
+
+¿Dudas? Escríbenos 💬
+
+---BUTTONS---
+[URL] 📍 Cómo llegar → {GOOGLE_MAPS_URL}
+[URL] 👔 Dress code → {SITE_URL}/info
+
+---VARIABLES---
+{{1}} = Nombre del invitado
+{{2}} = Nombre novio 1
+{{3}} = Nombre novio 2
+{{4}} = Día de la semana + número (ej: sábado 17)
+{{5}} = Mes (para gramática Meta, ej: de noviembre)
+{{6}} = Dress code completo
+{{7}} = Dirección del lugar
+{{8}} = Info de estacionamiento
+{{9}} = Clima (ej: Soleado, 28°C máx)

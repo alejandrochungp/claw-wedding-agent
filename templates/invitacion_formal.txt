@@ -1,0 +1,26 @@
+# Template: invitacion_formal
+# Categoría: MARKETING
+# Flujo: Invitación Formal → RSVP
+
+---HEADER---
+DOCUMENT: {INVITACION_PDF_URL}
+# PDF de carta formal de invitación (HTML→PDF con Chrome headless)
+# Personalizado con nombre del invitado y código RSVP único
+
+---BODY---
+{{1}}, tienes una invitación formal de parte de {{2}} & {{3}} 💌
+
+Tu invitación personalizada está lista. Confirma tu asistencia en nuestro sitio web:
+
+🔗 {{4}}
+
+---BUTTONS---
+[URL] 💌 Ver invitación → {PDF_URL}?guest={{5}}
+[URL] ✅ Confirmar asistencia → {SITE_URL}/rsvp?guest={{5}}
+
+---VARIABLES---
+{{1}} = Nombre del invitado
+{{2}} = Nombre novio 1
+{{3}} = Nombre novio 2
+{{4}} = URL del sitio web nupcial
+{{5}} = Código RSVP único del invitado

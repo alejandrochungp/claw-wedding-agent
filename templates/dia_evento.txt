@@ -1,0 +1,26 @@
+# Template: dia_evento
+# Categoría: MARKETING
+# Flujo: Día del evento → emoción + mapa
+
+---BODY---
+🎊 ¡HOY NOS CASAMOS! 🎊
+
+{{1}} & {{2}} 💍
+
+Te esperamos:
+📍 {{3}}
+🕕 {{4}} hrs
+🪑 Mesa {{5}}
+
+¡Hoy es el día, {{6}}! ❤️
+
+---BUTTONS---
+[URL] 📍 Cómo llegar → {GOOGLE_MAPS_URL_LIVE}
+
+---VARIABLES---
+{{1}} = Nombre novio 1
+{{2}} = Nombre novio 2
+{{3}} = Nombre del lugar
+{{4}} = Hora del evento
+{{5}} = Número de mesa
+{{6}} = Nombre del invitado
