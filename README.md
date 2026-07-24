@@ -114,12 +114,17 @@ wedding-planner/
 
 ## 📋 Roadmap
 
-### Fase 1 — Fundación (Sprint 1)
+### Fase 1 — Fundación (Sprint 1) ✅ COMPLETA
 - [x] Crear repo GitHub: `softifycl/claw-wedding-agent` (17 archivos, 1609 líneas)
-- [x] Railway: servicio `claw-wedding-agent` creado (ID: `28d3d063`) en proyecto `claw-whatsapp-webook`
-- [~] Conectar GitHub ↔ Railway (bloqueado: GitHub App no ve org `softifycl`, requiere verificación email)
-- [ ] Configurar WABA + número eSIM
-- [ ] Crear y aprobar templates Meta (Save the Date + Invitación)
+- [x] Railway: servicio `claw-wedding-agent` creado y ONLINE en `claw-whatsapp-webook`
+- [x] Conectar GitHub ↔ Railway (mirror `alejandrochungp/claw-wedding-agent` → Railway auto-deploy)
+- [x] Configurar WABA + número eSIM (+56994635497, Phone ID `1268610086327579`, VERIFIED)
+- [x] Configurar 5 env vars en Railway (PHONE_NUMBER_ID, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID, VERIFY_TOKEN, WHATSAPP_TOKEN)
+- [x] Webhook Meta cambiado a `claw-wedding-agent-production.up.railway.app/webhook`
+- [x] Webhook verificado con VERIFY_TOKEN real — devuelve challenge ✅
+- [x] server.js v1.1.0 — WhatsApp handling + Slack forwarding + auto-reply + templates
+- [x] Slack canal `#C0BK70984TZ` (PE) configurado para forward de mensajes
+- [ ] Crear y aprobar 8 templates Meta (~48h)
 - [ ] Sitio web estático base (HTML/CSS template nupcial)
 
 ### Fase 2 — Flujo Core (Sprint 2)

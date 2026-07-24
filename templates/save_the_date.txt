@@ -1,10 +1,10 @@
 # Template: save_the_date
 # Categoría: MARKETING
-# Flujo: Save the Date → espera confirmación recepción
+# Idioma: es
+# Imagen final: Missclick Pro — portadaweb_missclick.jpg
 
 ---HEADER---
-IMAGE: {SAVE_THE_DATE_IMAGE_URL}
-# Imagen del Save the Date generada con openai/gpt-image-2
+IMAGE: https://missclickpro.wordpress.com/wp-content/uploads/2025/07/portadaweb_missclick.jpg
 
 ---BODY---
 💍 {{1}} & {{2}}
@@ -18,14 +18,16 @@ IMAGE: {SAVE_THE_DATE_IMAGE_URL}
 Reserva la fecha — pronto llegará tu invitación formal ✨
 
 ---BUTTONS---
-[URL] 📅 Agregar al calendario → {CALENDAR_URL}
-[QUICK_REPLY] ✅ Recibido
+[BOTÓN 1] ✅ Confirmar asistencia — ID: confirmar_asistencia
+  → Responde con link de calendario + guarda RSVP en Google Sheets
+[BOTÓN 2] ❌ No podré asistir — ID: no_asistire
+  → Responde con agradecimiento + guarda en Google Sheets
 
 ---VARIABLES---
-{{1}} = Nombre novio 1
-{{2}} = Nombre novio 2
-{{3}} = Día (número)
-{{4}} = Mes (texto)
-{{5}} = Año
-{{6}} = Hora
-{{7}} = Lugar + ciudad
+{{1}} = Alejandro
+{{2}} = Kuilen
+{{3}} = 17
+{{4}} = noviembre
+{{5}} = 2026
+{{6}} = 18:00
+{{7}} = Restaurante Meihua, Cerrillos, Santiago

@@ -1,6 +1,6 @@
 {
   "name": "claw-wedding-agent",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "WhatsApp bot agent for wedding planning — Save the Date, RSVP, reminders, invitations",
   "main": "src/server.js",
   "scripts": {
@@ -12,10 +12,8 @@
   "dependencies": {
     "express": "^4.18.2",
     "axios": "^1.6.0",
-    "redis": "^4.6.0",
-    "dotenv": "^16.3.1",
-    "@slack/webhook": "^7.0.0",
-    "crypto": "^1.0.1"
+    "googleapis": "^148.0.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.0"
