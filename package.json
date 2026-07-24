@@ -10,10 +10,10 @@
     "campaign:test": "node scripts/test_campaign.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
     "axios": "^1.6.0",
-    "googleapis": "^148.0.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "ioredis": "^5.11.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.0"
@@ -25,7 +25,13 @@
     "type": "git",
     "url": "https://github.com/alejandrochungp/claw-wedding-agent.git"
   },
-  "keywords": ["whatsapp", "wedding", "bot", "meta-api", "railway"],
+  "keywords": [
+    "whatsapp",
+    "wedding",
+    "bot",
+    "meta-api",
+    "railway"
+  ],
   "author": "Alejandro Chung",
   "license": "UNLICENSED"
 }

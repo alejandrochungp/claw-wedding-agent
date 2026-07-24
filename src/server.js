@@ -1,11 +1,10 @@
 // claw-wedding-agent — WhatsApp Wedding Planner Bot
-// v1.2 — Interactive buttons + JSON file RSVP storage
+// v1.2 — Interactive buttons + Redis RSVP storage
 // Repo canónico: softifycl/claw-wedding-agent
 // Mirror (Railway): alejandrochungp/claw-wedding-agent
 
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
+const Redis = require('ioredis');
 const axios = require('axios');
 
 const app = express();
@@ -19,32 +18,25 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '';
 const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || '';
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 const WEDDING_SITE_URL = process.env.WEDDING_SITE_URL || 'https://boda.alejandro-y-kuilen.cl';
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 const META_API = 'https://graph.facebook.com/v22.0';
 const SLACK_API = 'https://slack.com/api';
 
-// ── RSVP Storage (JSON file on Railway volume) ───────────────
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
-const RSVP_FILE = path.join(DATA_DIR, 'rsvps.json');
+// ── Redis ────────────────────────────────────────────────────
+const redis = new Redis(REDIS_URL, {
+  maxRetriesPerRequest: 3,
+  retryStrategy(times) {
+    if (times > 5) return null;
+    return Math.min(times * 200, 2000);
+  },
+  lazyConnect: true,
+});
 
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-}
+const RSVP_KEY = 'wedding:rsvps';
 
-function loadRSVPs() {
-  ensureDataDir();
-  try {
-    if (fs.existsSync(RSVP_FILE)) {
-      return JSON.parse(fs.readFileSync(RSVP_FILE, 'utf8'));
-    }
-  } catch (e) { console.error('RSVP load error:', e.message); }
-  return [];
-}
-
-function saveRSVPs(rsvps) {
-  ensureDataDir();
-  fs.writeFileSync(RSVP_FILE, JSON.stringify(rsvps, null, 2), 'utf8');
-}
+redis.on('error', (err) => console.error('Redis error:', err.message));
+redis.on('connect', () => console.log('✅ Redis connected'));
 
 // ── Tenant Config ─────────────────────────────────────────────
 const TENANT = {
@@ -60,8 +52,11 @@ const TENANT = {
 };
 
 // ── Healthcheck ──────────────────────────────────────────────
-app.get('/status', (_req, res) => {
-  const rsvps = loadRSVPs();
+app.get('/status', async (_req, res) => {
+  let rsvpCount = 0;
+  try {
+    rsvpCount = await redis.llen(RSVP_KEY);
+  } catch (e) { /* redis might not be connected yet */ }
   res.json({
     status: 'ok',
     name: 'claw-wedding-agent',
@@ -71,7 +66,8 @@ app.get('/status', (_req, res) => {
     tenant: TENANT.id,
     whatsapp: !!WHATSAPP_TOKEN,
     slack: !!SLACK_BOT_TOKEN,
-    rsvps: rsvps.length,
+    redis: redis.status === 'ready',
+    rsvps: rsvpCount,
     phoneNumberId: PHONE_NUMBER_ID ? '***configured***' : 'missing',
   });
 });
@@ -168,32 +164,36 @@ async function handleButtonReply(from, buttonId, buttonText) {
   if (buttonId === 'confirmar_asistencia') {
     const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
     await sendWhatsAppMessage(from, confirmMsg);
-    saveRSVP(from, '✅ Confirmado', buttonText);
+    await saveRSVP(from, '✅ Confirmado', buttonText);
     await notifySlack(`🎉 *RSVP CONFIRMADO* \`${from}\``);
 
   } else if (buttonId === 'no_asistire') {
     const declineMsg = `Gracias por avisarnos, lo entendemos completamente 🫶\n\nTe tendremos presente ese día. ¡Un abrazo!`;
     await sendWhatsAppMessage(from, declineMsg);
-    saveRSVP(from, '❌ No asistirá', buttonText);
+    await saveRSVP(from, '❌ No asistirá', buttonText);
     await notifySlack(`💔 *NO ASISTIRÁ* \`${from}\``);
   }
 }
 
-// ── Save RSVP to JSON file ───────────────────────────────────
-function saveRSVP(phone, status, rawReply) {
-  const rsvps = loadRSVPs();
-  rsvps.push({
-    timestamp: new Date().toISOString(),
-    telefono: phone,
-    nombre: '',
-    apellido: '',
-    rsvp: status,
-    acompanantes: '',
-    mesa: '',
-    notas: rawReply || '',
-  });
-  saveRSVPs(rsvps);
-  console.log(`📊 RSVP saved: ${phone} → ${status} (total: ${rsvps.length})`);
+// ── Save RSVP to Redis ───────────────────────────────────────
+async function saveRSVP(phone, status, rawReply) {
+  try {
+    const entry = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      telefono: phone,
+      nombre: '',
+      apellido: '',
+      rsvp: status,
+      acompanantes: '',
+      mesa: '',
+      notas: rawReply || '',
+    });
+    await redis.rpush(RSVP_KEY, entry);
+    const count = await redis.llen(RSVP_KEY);
+    console.log(`📊 RSVP saved: ${phone} → ${status} (total: ${count})`);
+  } catch (err) {
+    console.error('❌ Redis save error:', err.message);
+  }
 }
 
 // ── Slack utilities ──────────────────────────────────────────
@@ -335,6 +335,7 @@ app.get('/admin/config', (_req, res) => {
       slackBotToken: !!SLACK_BOT_TOKEN,
       slackChannelId: !!SLACK_CHANNEL_ID,
       verifyToken: !!VERIFY_TOKEN,
+      redis: redis.status === 'ready',
     },
   });
 });
@@ -354,33 +355,54 @@ app.post('/admin/test-template', async (req, res) => {
 });
 
 // List all RSVPs
-app.get('/admin/rsvps', (_req, res) => {
-  const rsvps = loadRSVPs();
-  res.json({ total: rsvps.length, rsvps });
+app.get('/admin/rsvps', async (_req, res) => {
+  try {
+    const entries = await redis.lrange(RSVP_KEY, 0, -1);
+    const rsvps = entries.map(e => JSON.parse(e));
+    res.json({ total: rsvps.length, rsvps });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Export RSVPs as CSV (for Google Sheets import)
-app.get('/admin/rsvps.csv', (_req, res) => {
-  const rsvps = loadRSVPs();
-  const headers = ['Timestamp', 'Teléfono', 'Nombre', 'Apellido', 'RSVP', 'Acompañantes', 'Mesa', 'Notas'];
-  const rows = rsvps.map(r => [r.timestamp, r.telefono, r.nombre, r.apellido, r.rsvp, r.acompanantes, r.mesa, r.notas]);
-  const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
-  res.header('Content-Type', 'text/csv');
-  res.header('Content-Disposition', 'attachment; filename=rsvps.csv');
-  res.send(csv);
+// Stats: confirmed vs declined
+app.get('/admin/stats', async (_req, res) => {
+  try {
+    const entries = await redis.lrange(RSVP_KEY, 0, -1);
+    const rsvps = entries.map(e => JSON.parse(e));
+    const confirmed = rsvps.filter(r => r.rsvp.includes('Confirmado')).length;
+    const declined = rsvps.filter(r => r.rsvp.includes('No asistir')).length;
+    const total = rsvps.length;
+    res.json({ total, confirmed, declined, pending: total - confirmed - declined });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Start ───────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`💒 claw-wedding-agent v1.2 running on port ${PORT}`);
-  console.log(`   Tenant:    ${TENANT.id}`);
-  console.log(`   Health:    http://localhost:${PORT}/status`);
-  console.log(`   Webhook:   http://localhost:${PORT}/webhook`);
-  console.log(`   WhatsApp:  ${WHATSAPP_TOKEN ? '✅ configured' : '❌ missing'}`);
-  console.log(`   Slack:     ${SLACK_BOT_TOKEN && SLACK_CHANNEL_ID ? '✅ configured' : '❌ missing'}`);
-  console.log(`   Data dir:  ${DATA_DIR}`);
-  console.log(`   Site:      ${TENANT.siteUrl}`);
-  console.log(`   RSVP file: ${RSVP_FILE}`);
+async function start() {
+  try {
+    await redis.connect();
+    console.log('✅ Redis connected');
+  } catch (err) {
+    console.warn('⚠️ Redis not available, starting without it');
+  }
+
+  app.listen(PORT, () => {
+    console.log(`💒 claw-wedding-agent v1.2 running on port ${PORT}`);
+    console.log(`   Tenant:    ${TENANT.id}`);
+    console.log(`   Health:    http://localhost:${PORT}/status`);
+    console.log(`   Webhook:   http://localhost:${PORT}/webhook`);
+    console.log(`   WhatsApp:  ${WHATSAPP_TOKEN ? '✅ configured' : '❌ missing'}`);
+    console.log(`   Slack:     ${SLACK_BOT_TOKEN && SLACK_CHANNEL_ID ? '✅ configured' : '❌ missing'}`);
+    console.log(`   Redis:     ${redis.status === 'ready' ? '✅ connected' : '❌ not connected'}`);
+    console.log(`   Site:      ${TENANT.siteUrl}`);
+  });
+}
+
+start().catch(err => {
+  console.error('Failed to start:', err);
+  process.exit(1);
 });
 
 module.exports = { app, sendWhatsAppMessage, sendTemplate, TENANT };
