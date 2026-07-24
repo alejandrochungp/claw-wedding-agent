@@ -161,13 +161,17 @@ async function handleIncomingMessage(msg, fromPhone) {
 
 // ── Button Reply Handler ─────────────────────────────────────
 async function handleButtonReply(from, buttonId, buttonText) {
-  if (buttonId === 'confirmar_asistencia') {
+  // Handle both template QUICK_REPLY payloads (button text) and legacy payloads
+  const isConfirm = buttonId === 'Confirmar asistencia' || buttonId === 'confirmar_asistencia';
+  const isDecline = buttonId === 'No podre asistir' || buttonId === 'no_asistire';
+
+  if (isConfirm) {
     const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
     await sendWhatsAppMessage(from, confirmMsg);
     await saveRSVP(from, '✅ Confirmado', buttonText);
     await notifySlack(`🎉 *RSVP CONFIRMADO* \`${from}\``);
 
-  } else if (buttonId === 'no_asistire') {
+  } else if (isDecline) {
     const declineMsg = `Gracias por avisarnos, lo entendemos completamente 🫶\n\nTe tendremos presente ese día. ¡Un abrazo!`;
     await sendWhatsAppMessage(from, declineMsg);
     await saveRSVP(from, '❌ No asistirá', buttonText);
