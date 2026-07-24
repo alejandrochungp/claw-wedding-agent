@@ -1,28 +1,43 @@
 # Guía de Deploy — claw-wedding-agent
 
 > Basado en la arquitectura probada de `claw-whatsapp-agent` (Softify) en Railway.
-> **Última actualización:** 23-Jul-2026
+> **Última actualización:** 24-Jul-2026
 
 ## 📊 Estado Actual
 
 | Componente | Estado | Detalle |
 |-----------|--------|--------|
-| Repo GitHub | ✅ | `softifycl/claw-wedding-agent` (17 archivos, 1609 líneas) |
-| Railway Service | ✅ | Creado: `claw-wedding-agent` (ID: `28d3d063-4925-4988-8157-7181e83ab563`) |
-| Railway Project | ✅ | `claw-whatsapp-webook` (`c43915bc-24a0-4987-b8d1-d23a9dddc565`) |
-| GitHub ↔ Railway | ⚠️ | Railway GitHub App no ve `softifycl` org — requiere verificación email |
+| Repo GitHub | ✅ | `softifycl/claw-wedding-agent` (17 archivos, 1609 líneas, commit `ae790c5`) |
+| Mirror GitHub | ✅ | `alejandrochungp/claw-wedding-agent` (commit `b9bf079`, mismo contenido) |
+| Railway Service | ✅ | `claw-wedding-agent` (ID: `28d3d063`) en proyecto `claw-whatsapp-webook` |
+| GitHub ↔ Railway | ✅ | Mirror conectado desde dashboard por Alejandro (24-Jul-2026) |
+| Railway Deploy | ⏳ | Esperando confirmación de deploy automático |
 | Meta App | ❌ | Pendiente crear en developers.facebook.com |
 | Redis | ✅ | Ya existe en el proyecto (`redis-volume`) |
 | Sitio Web | ❌ | Pendiente GitHub Pages |
 
-### ⚠️ Bloqueante: Conexión GitHub ↔ Railway
+### 🔑 Arquitectura de Repos (Decisión 24-Jul-2026)
 
-Railway GitHub App solo ve repos de `alejandrochungp`. Para conectar `softifycl/claw-wedding-agent`:
-1. Alejandro debe verificar email de GitHub (sudo mode) en `github.com/settings/installations/114756659`
-2. Grant access a la org `softifycl`
-3. Refresh repo list en Railway → aparecerá `softifycl/claw-wedding-agent`
+Alejandro prefiere usar la cuenta `softifycl` como fuente canónica del código.
 
-**Workaround express:** Pushear repo también a `alejandrochungp/claw-wedding-agent` (visible inmediatamente en Railway).
+- **Canonical:** `softifycl/claw-wedding-agent` (org) — fuente de verdad
+- **Mirror:** `alejandrochungp/claw-wedding-agent` (personal) — solo para visibilidad Railway
+
+Razón: Railway GitHub App (installation `114756659`) está instalada en la cuenta personal `alejandrochungp` y solo indexa repos de esa cuenta. El mirror existe como workaround hasta que Railway soporte orgs directamente.
+
+Flujo de trabajo:
+```
+git push origin master     → softifycl/claw-wedding-agent (canonical)
+git push mirror master     → alejandrochungp/claw-wedding-agent (Railway auto-deploy)
+```
+
+### ⚠️ Resuelto: Conexión GitHub ↔ Railway (24-Jul-2026)
+
+1. ✅ GitHub sudo mode verificado con código enviado a `alejandro@yeppo.cl`
+2. ✅ PAT creado para `alejandrochungp` con scope `repo` (expira 30 días)
+3. ✅ Push exitoso al mirror con el PAT
+4. ✅ Alejandro conectó Railway desde el dashboard (dijo "listo")
+5. ⏳ Verificar que el deploy automático se haya ejecutado
 
 ## 📋 Prerrequisitos
 
