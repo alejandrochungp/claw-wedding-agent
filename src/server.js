@@ -1,5 +1,5 @@
 // claw-wedding-agent — WhatsApp Wedding Planner Bot
-// v1.2 — Interactive buttons + Redis RSVP storage
+// v1.3 — Multi-tenant Meta App + phone-level filtering
 // Repo canónico: softifycl/claw-wedding-agent
 // Mirror (Railway): alejandrochungp/claw-wedding-agent
 
@@ -15,6 +15,8 @@ const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'wedding_verify_2026';
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || '';
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || '';
+const META_APP_ID = process.env.META_APP_ID || '';
+const META_APP_SECRET = process.env.META_APP_SECRET || '';
 const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || '';
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 const WEDDING_SITE_URL = process.env.WEDDING_SITE_URL || 'https://boda.alejandro-y-kuilen.cl';
@@ -60,7 +62,7 @@ app.get('/status', async (_req, res) => {
   res.json({
     status: 'ok',
     name: 'claw-wedding-agent',
-    version: '1.2.0',
+    version: '1.3.0',
     uptime: Math.floor(process.uptime()),
     node: process.version,
     tenant: TENANT.id,
@@ -69,6 +71,7 @@ app.get('/status', async (_req, res) => {
     redis: redis.status === 'ready',
     rsvps: rsvpCount,
     phoneNumberId: PHONE_NUMBER_ID ? '***configured***' : 'missing',
+    metaApp: META_APP_ID ? `${META_APP_ID.slice(0, 8)}...` : 'missing',
   });
 });
 
@@ -94,10 +97,17 @@ app.post('/webhook', async (req, res) => {
   for (const entry of body.entry || []) {
     for (const change of entry.changes || []) {
       const value = change.value || {};
+      const metadata = value.metadata || {};
+
+      // Phone-level filtering: only process messages for Wedding Planner number
+      if (PHONE_NUMBER_ID && metadata.phone_number_id !== PHONE_NUMBER_ID) {
+        console.log(`⏭️ Skipping msg for ${metadata.phone_number_id} (not ${PHONE_NUMBER_ID})`);
+        continue;
+      }
 
       if (value.messages) {
         for (const msg of value.messages) {
-          await handleIncomingMessage(msg, value.metadata?.display_phone_number);
+          await handleIncomingMessage(msg, metadata.display_phone_number);
         }
       }
 
