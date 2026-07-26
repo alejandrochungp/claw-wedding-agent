@@ -1,5 +1,5 @@
 // claw-wedding-agent — WhatsApp Wedding Planner Bot
-// v1.5.0 — LLM-based RSVP classification + Mateo Slack App (redeploy for OPENAI_API_KEY)
+// v1.6.0 — Claude RSVP + auto-replies (claude-sonnet-4-6) + Mateo Slack App
 // Repo canónico: softifycl/claw-wedding-agent
 // Mirror (Railway): alejandrochungp/claw-wedding-agent
 
