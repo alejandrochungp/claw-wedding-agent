@@ -76,7 +76,7 @@ app.get('/status', async (_req, res) => {
   res.json({
     status: 'ok',
     name: 'claw-wedding-agent',
-    version: '1.5.0',
+    version: '1.6.0',
     uptime: Math.floor(process.uptime()),
     node: process.version,
     tenant: TENANT.id,
