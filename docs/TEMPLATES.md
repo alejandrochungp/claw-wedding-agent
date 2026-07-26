@@ -18,14 +18,19 @@
 
 ---
 
-## Template 1: `save_the_date`
+## Template 1: `save_the_date` (v1 — OBSOLETO)
 
-**Nombre Meta:** `wedding_save_the_date`
+**Meta ID:** `4059477664346100`
+**Status:** APPROVED (25-Jul-2026)
 **Categoría:** MARKETING
 **Idioma:** es
 
-### Header (IMAGE)
-Imagen del Save the Date (generada por `openai/gpt-image-2` o foto pareja)
+> ⚠️ Reemplazado por `save_the_date_v2`. Mantener solo para referencia.
+
+### Header (TEXT)
+```
+💍 {{1}} & {{2}} — ¡Nos casamos!
+```
 
 ### Body
 ```
@@ -49,13 +54,137 @@ Reserva la fecha — pronto llegará tu invitación formal ✨
 | {{4}} | noviembre |
 | {{5}} | 2026 |
 | {{6}} | 18:00 |
-| {{7}} | Restaurante Meihua, Cerrillo, Santiago |
+| {{7}} | Restaurante Meihua, Cerrillos, Santiago |
 
 ### Botones
-| Tipo | Texto | Acción |
-|------|-------|--------|
-| URL | 📅 Agregar al calendario | Google Calendar link |
-| QUICK_REPLY | ✅ Recibido | Marca como entregado |
+| Tipo | Texto |
+|------|-------|
+| QUICK_REPLY | Confirmar asistencia |
+| QUICK_REPLY | No podre asistir |
+
+---
+
+## Template 1b: `save_the_date_v2` ✅ (ACTIVO)
+
+**Meta ID:** `2274081063416149`
+**Status:** APPROVED (25-Jul-2026 21:17)
+**Categoría:** MARKETING
+**Idioma:** es
+
+> Versión simplificada en tono Alejandro: solo fecha, sin hora ni lugar. Pre-confirmación de asistencia.
+
+### Header (TEXT)
+```
+Oye, {{1}} — nos casamos pronto
+```
+> 📌 **HEADER IMAGE logrado:** Ver template `save_the_date_v3` abajo.
+> La imagen está en: `https://missclickpro.wordpress.com/wp-content/uploads/2025/07/portadaweb_missclick.jpg`
+
+### Body
+```
+💍 {{1}} y {{2}} — {{3}} de {{4}} de {{5}}
+
+Nos casamos. Reserva la fecha.
+
+Los detalles te llegan después con la invitación formal. Por ahora solo dime si vienes.
+```
+
+### Variables
+| Var | Ejemplo |
+|-----|---------|
+| {{1}} | Alejandro |
+| {{2}} | Kuilen |
+| {{3}} | 17 |
+| {{4}} | noviembre |
+| {{5}} | 2026 |
+
+### Botones
+| Tipo | Texto |
+|------|-------|
+| QUICK_REPLY | Confirmar asistencia |
+| QUICK_REPLY | No podre asistir |
+
+### Cambios vs v1
+- ❌ Sin hora ({{6}} eliminado)
+- ❌ Sin lugar ({{7}} eliminado)
+- ✅ Tono directo (Alejandro)
+- ✅ Solo 5 variables (más simple)
+- ✅ Propósito claro: pre-confirmación
+
+---
+
+## Template 1c: `save_the_date_v3` ✅ (ACTIVO — IMAGE HEADER)
+
+**Meta ID:** `1359786772191285`
+**Status:** APPROVED (25-Jul-2026 21:17)
+**Categoría:** MARKETING
+**Idioma:** es
+
+> ✅ **Con IMAGEN.** Creado vía Resumable Upload API (App token). Método replicado de campaña BTS ARIRANG (Mayo 2026).
+
+### Header (IMAGE)
+Foto de la pareja por **Missclick Pro**:
+`https://missclickpro.wordpress.com/wp-content/uploads/2025/07/portadaweb_missclick.jpg`
+
+**Media ID para envío:** `1592980732290849`
+
+### Body
+```
+💍 {{1}} y {{2}} — {{3}} de {{4}} de {{5}}
+
+Nos casamos. Reserva la fecha.
+
+Los detalles te llegan después con la invitación formal. Por ahora solo dime si vienes.
+```
+
+### Variables (5)
+| Var | Ejemplo |
+|-----|---------|
+| {{1}} | Alejandro |
+| {{2}} | Kuilen |
+| {{3}} | 17 |
+| {{4}} | noviembre |
+| {{5}} | 2026 |
+
+### Botones
+| Tipo | Texto |
+|------|-------|
+| QUICK_REPLY | Confirmar asistencia |
+| QUICK_REPLY | No podre asistir |
+
+### Método de creación (Resumable Upload API)
+1. `GET /oauth/access_token?client_credentials` → App token
+2. `POST /v22.0/{APP_ID}/uploads` → session_id
+3. `POST /v22.0/{session_id}` con bytes crudos → handle `h`
+4. Inmediatamente crear template con `header_handle: [handle_h]`
+5. Para envío: subir a `/media` del phone → usar `image.id` como parámetro
+
+### Envío del template
+```json
+{
+  "type": "template",
+  "template": {
+    "name": "save_the_date_v3",
+    "language": {"code": "es"},
+    "components": [
+      {
+        "type": "header",
+        "parameters": [{"type": "image", "image": {"id": "1592980732290849"}}]
+      },
+      {
+        "type": "body",
+        "parameters": [
+          {"type": "text", "text": "Alejandro"},
+          {"type": "text", "text": "Kuilen"},
+          {"type": "text", "text": "17"},
+          {"type": "text", "text": "noviembre"},
+          {"type": "text", "text": "2026"}
+        ]
+      }
+    ]
+  }
+}
+```
 
 ---
 

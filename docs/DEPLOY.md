@@ -1,128 +1,146 @@
 # Guía de Deploy — claw-wedding-agent
 
 > Basado en la arquitectura probada de `claw-whatsapp-agent` (Softify) en Railway.
-> **Última actualización:** 24-Jul-2026 13:20 CLT
+> **Última actualización:** 25-Jul-2026 18:14 CLT
 
 ## 📊 Estado Actual
 
 | Componente | Estado | Detalle |
 |-----------|--------|--------|
-| Repo GitHub | ✅ | `softifycl/claw-wedding-agent` (canonical, commit `ae790c5`) |
-| Mirror GitHub | ✅ | `alejandrochungp/claw-wedding-agent` (commit `b9bf079`) |
+| Repo GitHub | ✅ | `softifycl/claw-wedding-agent` (canonical) |
+| Mirror GitHub | ✅ | `alejandrochungp/claw-wedding-agent` (commit `5c561c0`) |
 | Railway Service | ✅ | `claw-wedding-agent` ONLINE en `claw-whatsapp-webook` |
-| Railway Deploy | ✅ | v1.1.0 desplegada y funcionando |
-| Server.js | ✅ | v1.1.0 — WhatsApp handling + Slack forwarding + auto-reply + templates |
-| Env Vars Railway | ✅ | 5 vars configuradas y deployadas |
-| Webhook Verification | ✅ | Verificado con `VERIFY_TOKEN` real — devuelve challenge correctamente |
-| Meta App | ✅ | App ID `1636363614308117` (compartida con Softify) |
-| Meta Webhook URL | ✅ | Cambiada a `claw-wedding-agent-production.up.railway.app/webhook` |
-| Número WhatsApp | ✅ | +56994635497, Phone Number ID `1268610086327579`, VERIFIED |
+| Railway Deploy | ✅ | v1.3.0 desplegada con phone filtering + Meta App separada |
+| Server.js | ✅ | v1.3.0 — WhatsApp + Slack + templates + Redis RSVP + QUICK_REPLY + phone filtering |
+| Env Vars Railway | ✅ | 8/8 configuradas (incluye META_APP_ID y META_APP_SECRET) |
+| Redis | ✅ | Railway Redis nativo — conexión funcionando |
+| Webhook Verification | ✅ | Verificado con `VERIFY_TOKEN` real |
+| Meta App Softify | ✅ | App `1636363614308117` — webhook → `softify-...railway.app` |
+| Meta App Wedding Planner | ✅ | App `1261291912568631` (reciclada, no usada) — webhook → `claw-wedding-agent...railway.app` |
+| Número Wedding Planner 5497 | ✅ | CONNECTED, CLOUD_API, VERIFIED — listo para enviar |
+| Número Softify 3050 | ✅ | CONNECTED, CLOUD_API — 3050 se usa activamente |
 | Slack Canal | ✅ | `C0BK70984TZ` (canal PE) |
-| WhatsApp Templates | ⏳ | 8 templates pendientes de aprobación (~48h) |
+| Template save_the_date | ⏳ | ID `4059477664346100`, status PENDING (HEADER TEXT, 2 QUICK_REPLY) |
 | Sitio Web | ⏳ | Pendiente GitHub Pages |
 
-### 🔑 Arquitectura de Repos (Decisión 24-Jul-2026)
+## 🏗️ Arquitectura Final — 2 Meta Apps Separadas
 
-- **Canonical:** `softifycl/claw-wedding-agent` (org) — fuente de verdad
-- **Mirror:** `alejandrochungp/claw-wedding-agent` (personal) — visibilidad Railway
-
-Razón: Railway GitHub App está instalada en `alejandrochungp` y solo indexa repos de esa cuenta.
-
-Flujo de trabajo:
 ```
-git push origin master     → softifycl/claw-wedding-agent (canonical)
-git push mirror master     → alejandrochungp/claw-wedding-agent (Railway auto-deploy)
-```
-
-### 🔑 Meta App (Compartida con Softify)
-
-- **App ID:** `1636363614308117`
-- **App Secret:** `cccf4cdca8ea02b2fb3da682b9e5e345`
-- **WABA ID:** `1004041115557689`
-- **WhatsApp Token:** `EAAXQQ5f0RxU...` (mismo de Softify)
-- **Webhook URL:** `https://claw-wedding-agent-production.up.railway.app/webhook`
-- **VERIFY_TOKEN:** `J-drYsspYZMpK29djINiH2arK2EU_DNvxP9LNiM0fuU`
-
-El número Wedding Planner (+56994635497) comparte la misma Meta App y WABA con Softify (+56961450273). Ambos números enrutan al mismo webhook — el server.js debe manejar multi-tenant routing.
-
-## 🚀 Variables de Entorno (Railway)
-
-| Variable | Valor | Estado |
-|----------|-------|--------|
-| `PHONE_NUMBER_ID` | `1268610086327579` | ✅ |
-| `SLACK_BOT_TOKEN` | `xoxb-6…elrl` | ✅ |
-| `SLACK_CHANNEL_ID` | `C0BK70984TZ` | ✅ |
-| `VERIFY_TOKEN` | `J-drYsspYZMpK29djINiH2arK2EU_DNvxP9LNiM0fuU` | ✅ |
-| `WHATSAPP_TOKEN` | `EAAXQQ5f0RxU...` | ✅ |
-
-### Variables automáticas de Railway
-- `PORT=8080` (Railway lo inyecta automáticamente)
-
-## 🚀 Deploy Actual
-
-### Dominio Público
-```
-https://claw-wedding-agent-production.up.railway.app
+WABA 1004041115557689
+├── Meta App Softify (1636363614308117)
+│   ├── Webhook → softify-whatsapp-webhook-production.up.railway.app/webhook
+│   └── Número: +56 9 4170 3050 (Phone ID 1122911184237640)
+│
+└── Meta App Wedding Planner (1261291912568631) ← RECICLADA
+    ├── Webhook → claw-wedding-agent-production.up.railway.app/webhook
+    └── Número: +56 9 9463 5497 (Phone ID 1268610086327579)
 ```
 
-### Endpoints
+**Flujo de mensajes:**
+- Ambas apps comparten el mismo WABA → ambas reciben webhooks de TODOS los números
+- Cada servidor filtra por `metadata.phone_number_id` en el payload
+- Softify server procesa solo mensajes del 3050
+- Wedding Agent procesa solo mensajes del 5497
 
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/status` | GET | Healthcheck + estado de configuración |
-| `/admin/config` | GET | Configuración completa del tenant |
-| `/admin/test-message` | POST | Enviar mensaje de prueba WhatsApp |
-| `/admin/test-template` | POST | Enviar template de prueba |
-| `/webhook` | GET | Verificación webhook Meta |
-| `/webhook` | POST | Recepción de mensajes WhatsApp |
+**Ventajas de Meta Apps separadas:**
+- Webhooks independientes sin conflicto
+- Aislamiento total entre proyectos
+- No requiere phone-level webhook (que NO existe vía API)
+- Cada app puede tener sus propios templates, tokens, y config
 
-### Verificación
+## 🔑 Credenciales
+
+### Meta App Softify (existente)
+| Campo | Valor |
+|-------|-------|
+| App ID | `1636363614308117` |
+| App Secret | `cccf4cdca8ea02b2fb3da682b9e5e345` |
+| WABA ID | `1004041115557689` |
+| WhatsApp Token | `EAAXQQ5f0RxU...` |
+| Archivo | `.secrets/softify_meta_app.txt` |
+
+### Meta App Wedding Planner (reciclada 25-Jul-2026)
+| Campo | Valor |
+|-------|-------|
+| App ID | `1261291912568631` |
+| App Secret | `118b4faddf91c211a13c166b58cb9c14` |
+| WABA ID | `1004041115557689` (compartido) |
+| Phone Number ID | `1268610086327579` (+56994635497) |
+| Archivo | `.secrets/wedding_meta_app.txt` |
+
+## 📋 Diagnóstico 25-Jul-2026 — Resuelto
+
+### Problema original: Conflicto de Meta App compartida
+Softify y Wedding Planner compartían la misma Meta App. Una Meta App = un solo webhook URL.
+Al cambiar el webhook a Wedding Planner, Softify dejó de recibir mensajes.
+
+### Solución: Meta App separada (Opción A)
+Alejandro recicló una Meta App existente que no se usaba (ID `1261291912568631`):
+1. ✅ Webhook de Softify restaurado → `softify-...railway.app`
+2. ✅ Webhook de Wedding Planner configurado en nueva app → `claw-wedding-agent...railway.app`
+3. ✅ server.js v1.3.0 con phone-level filtering para que cada server procese solo sus mensajes
+4. ✅ META_APP_ID y META_APP_SECRET agregados a Railway env vars
+
+### Phone-level webhook: NO disponible
+Subagente `wa-phone-webhook-register` confirmó que el webhook a nivel de número es read-only vía API.
+No se puede cambiar programáticamente. La solución de Meta Apps separadas es la correcta.
+
+### Corrección: 5497 está CONNECTED con CLOUD_API
+Diagnóstico anterior de `platform_type: NOT_APPLICABLE` y `#133010` estaba equivocado:
+- 5497: status CONNECTED, platform_type CLOUD_API, code_verification VERIFIED ✅
+- 3050: status CONNECTED, platform_type CLOUD_API, code_verification EXPIRED (pero funciona) ✅
+
+## 🚀 Railway Env Vars (8/8)
+
+| Variable | Valor | Nota |
+|----------|-------|------|
+| `PHONE_NUMBER_ID` | `1268610086327579` | Número Wedding Planner 5497 |
+| `WHATSAPP_TOKEN` | `EAAXQQ5f0RxU...` | System User token (WABA-level) |
+| `VERIFY_TOKEN` | `J-drYsspYZMpK29djINiH2arK2EU_DNvxP9LNiM0fuU` | Webhook verification |
+| `REDIS_URL` | `${{Redis.REDIS_URL}}` | Railway Redis nativo |
+| `SLACK_BOT_TOKEN` | `xoxb-6…elrl` | Bot "Mateo" |
+| `SLACK_CHANNEL_ID` | `C0BK70984TZ` | Canal PE |
+| `META_APP_ID` | `1261291912568631` | Wedding Planner Meta App |
+| `META_APP_SECRET` | `118b4faddf91c211a13c166b58cb9c14` | Wedding Planner App Secret |
+
+## 🔗 Endpoints
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/status` | Healthcheck (versión, Redis, RSVP count) |
+| GET | `/webhook` | Meta webhook verification |
+| POST | `/webhook` | Meta webhook event handler |
+| GET | `/admin/config` | Tenant + configuración |
+| POST | `/admin/test-message` | Enviar mensaje de prueba `{to, text}` |
+| POST | `/admin/test-template` | Enviar template `{to, template, params}` |
+| GET | `/admin/rsvps` | Listar todos los RSVPs |
+| GET | `/admin/stats` | Estadísticas (confirmados, rechazados, pendientes) |
+
+Dominio público: `https://claw-wedding-agent-production.up.railway.app`
+
+## 📦 Deploy
 
 ```bash
-# Status
-curl https://claw-wedding-agent-production.up.railway.app/status
-# → {"status":"ok","name":"claw-wedding-agent","version":"1.1.0","uptime":393,...}
-
-# Webhook verification
-curl "https://claw-wedding-agent-production.up.railway.app/webhook?hub.mode=subscribe&hub.verify_token=J-drYsspYZMpK29djINiH2arK2EU_DNvxP9LNiM0fuU&hub.challenge=test123"
-# → 200 OK: "test123"
+# Push a ambos remotos (Railway auto-deploy desde mirror)
+cd projects/wedding-planner
+git push origin master    # softifycl/claw-wedding-agent (canonical)
+git push mirror master    # alejandrochungp/claw-wedding-agent (Railway)
 ```
 
-## 📊 Costos Estimados
+## ⚠️ Pendientes
 
-| Recurso | Plan | Costo mensual |
-|---------|------|---------------|
-| Railway | Hobby ($5/mes) | $5 USD |
-| Meta API | WhatsApp Business API | $0 (gratis) |
-| GitHub Pages | Static hosting | $0 |
-| **Total** | | **~$5 USD/mes** |
+1. **Probar envío desde número 5497** — una vez que el template `save_the_date` sea aprobado por Meta
+2. **Añadir imagen al template** — HEADER TEXT → HEADER IMAGE con `portadaweb_missclick.jpg`
+3. **Probar flujo completo de RSVP** — enviar WhatsApp → botones → Redis → Slack PE
+4. **Someter 7 templates restantes** — `recordatorio_7d`, `recordatorio_24h`, `invitacion_formal`, etc.
+5. **Sitio web nupcial** — GitHub Pages con 5 páginas estáticas
 
-## 🔄 CI/CD
+## 📚 Referencias
 
-Railway auto-deploya cada push al mirror. Flujo:
-
-```
-git push origin master     → softifycl/claw-wedding-agent (canonical)
-git push mirror master     → alejandrochungp/claw-wedding-agent → Railway auto-deploy
-```
-
-## 🛠 Mantenimiento
-
-### Logs
-```bash
-railway logs
-```
-
-### Monitoreo
-- Railway Dashboard: CPU, memoria, requests
-- Slack `#C0BK70984TZ`: forward de mensajes entrantes
-- Meta Business Manager: métricas de mensajería
-
-## ⚠️ Troubleshooting
-
-| Problema | Causa probable | Solución |
-|----------|---------------|----------|
-| Webhook no verifica | URL incorrecta o token mismatch | Verificar `VERIFY_TOKEN` en Railway y Meta |
-| Mensajes no llegan a Slack | `SLACK_BOT_TOKEN` expirado | Regenerar token en api.slack.com/apps |
-| Templates REJECTED | Formato inválido | Revisar `docs/TEMPLATES.md`, corregir y reenviar |
-| Mensajes WhatsApp no entregados | Número no verificado o rate limit | Verificar en Meta Business Manager |
+- **Proyecto:** `projects/wedding-planner/`
+- **README:** `projects/wedding-planner/README.md`
+- **Arquitectura:** `projects/wedding-planner/docs/ARCHITECTURE.md`
+- **Templates:** `projects/wedding-planner/docs/TEMPLATES.md`
+- **Flows:** `projects/wedding-planner/docs/FLOWS.md`
+- **Website:** `projects/wedding-planner/docs/WEBSITE.md`
+- **Secrets:** `.secrets/wedding_meta_app.txt`, `.secrets/softify_meta_app.txt`, `.secrets/softify_wa_token.txt`

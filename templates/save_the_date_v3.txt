@@ -1,0 +1,77 @@
+# save_the_date_v3 — Template WhatsApp con IMAGEN (ACTIVO)
+
+Meta ID: 1359786772191285
+Status: PENDING
+Categoría: MARKETING
+Idioma: es
+Creado: 25-Jul-2026 21:03
+
+## Estructura
+
+### Header (IMAGE)
+Foto de la pareja por Missclick Pro
+URL: https://missclickpro.wordpress.com/wp-content/uploads/2025/07/portadaweb_missclick.jpg
+Media ID (send): 1592980732290849
+
+### Body
+💍 {{1}} y {{2}} — {{3}} de {{4}} de {{5}}
+
+Nos casamos. Reserva la fecha.
+
+Los detalles te llegan después con la invitación formal. Por ahora solo dime si vienes.
+
+### Variables
+| Var | Ejemplo |
+|-----|---------|
+| {{1}} | Alejandro |
+| {{2}} | Kuilen |
+| {{3}} | 17 |
+| {{4}} | noviembre |
+| {{5}} | 2026 |
+
+### Botones
+- QUICK_REPLY: Confirmar asistencia
+- QUICK_REPLY: No podre asistir
+
+## Método de creación (Resumable Upload API)
+Documentado en memory/2026-07-25.md (entrada 21:03).
+
+1. App token vía client_credentials
+2. Upload session vía POST /v22.0/{APP_ID}/uploads
+3. Upload bytes vía POST /v22.0/{session_id} con OAuth header
+4. Usar handle `h` en template creation inmediatamente
+5. Para envío: subir imagen a /media del phone → usar media_id como parámetro
+
+## Uso (enviar template)
+```python
+# Upload image for sending
+media_id = "1592980732290849"  # pre-uploaded
+
+body = {
+    "messaging_product": "whatsapp",
+    "to": "569XXXXXXXX",
+    "type": "template",
+    "template": {
+        "name": "save_the_date_v3",
+        "language": {"code": "es"},
+        "components": [
+            {
+                "type": "header",
+                "parameters": [
+                    {"type": "image", "image": {"id": media_id}}
+                ]
+            },
+            {
+                "type": "body",
+                "parameters": [
+                    {"type": "text", "text": "Alejandro"},
+                    {"type": "text", "text": "Kuilen"},
+                    {"type": "text", "text": "17"},
+                    {"type": "text", "text": "noviembre"},
+                    {"type": "text", "text": "2026"}
+                ]
+            }
+        ]
+    }
+}
+```

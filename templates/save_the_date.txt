@@ -19,9 +19,9 @@ Reserva la fecha — pronto llegará tu invitación formal ✨
 
 ---BUTTONS---
 [BOTÓN 1] ✅ Confirmar asistencia — ID: confirmar_asistencia
-  → Responde con link de calendario + guarda RSVP en Google Sheets
+  → Responde con link de calendario + guarda RSVP en Redis (Upstash)
 [BOTÓN 2] ❌ No podré asistir — ID: no_asistire
-  → Responde con agradecimiento + guarda en Google Sheets
+  → Responde con agradecimiento + guarda en Redis (Upstash)
 
 ---VARIABLES---
 {{1}} = Alejandro

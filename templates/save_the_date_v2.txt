@@ -1,0 +1,51 @@
+# save_the_date_v2 — Template WhatsApp (ACTIVO)
+
+Meta ID: 2274081063416149
+Status: PENDING
+Categoría: MARKETING
+Idioma: es
+Creado: 25-Jul-2026 20:35
+
+## Estructura
+
+### Header (TEXT)
+"Oye, {{1}} — nos casamos pronto"
+
+### Body
+💍 {{1}} y {{2}} — {{3}} de {{4}} de {{5}}
+
+Nos casamos. Reserva la fecha.
+
+Los detalles te llegan después con la invitación formal. Por ahora solo dime si vienes.
+
+### Botones
+- QUICK_REPLY: Confirmar asistencia
+- QUICK_REPLY: No podre asistir
+
+## Uso
+```python
+body = {
+    "messaging_product": "whatsapp",
+    "to": "569XXXXXXXX",
+    "type": "template",
+    "template": {
+        "name": "save_the_date_v2",
+        "language": {"code": "es"},
+        "components": [{
+            "type": "body",
+            "parameters": [
+                {"type": "text", "text": "Alejandro"},
+                {"type": "text", "text": "Kuilen"},
+                {"type": "text", "text": "17"},
+                {"type": "text", "text": "noviembre"},
+                {"type": "text", "text": "2026"}
+            ]
+        }]
+    }
+}
+```
+
+## Pendiente
+- [ ] Meta approval (~1-4h)
+- [ ] Cambiar HEADER TEXT → IMAGE con foto Missclick (vía WhatsApp Manager UI, 30 segundos)
+- [ ] Enviar test a Alejandro una vez aprobado
