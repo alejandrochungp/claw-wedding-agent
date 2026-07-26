@@ -1,5 +1,5 @@
 // claw-wedding-agent — WhatsApp Wedding Planner Bot
-// v1.4.0 — Slack↔WhatsApp bidirectional + enhanced RSVP + webhook simulator
+// v1.5.0 — LLM-based RSVP classification + Mateo Slack App
 // Repo canónico: softifycl/claw-wedding-agent
 // Mirror (Railway): alejandrochungp/claw-wedding-agent
 
@@ -22,6 +22,7 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
 const WEDDING_SITE_URL = process.env.WEDDING_SITE_URL || 'https://boda.alejandro-y-kuilen.cl';
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 
 const META_API = 'https://graph.facebook.com/v22.0';
 const SLACK_API = 'https://slack.com/api';
@@ -74,7 +75,7 @@ app.get('/status', async (_req, res) => {
   res.json({
     status: 'ok',
     name: 'claw-wedding-agent',
-    version: '1.4.0',
+    version: '1.5.0',
     uptime: Math.floor(process.uptime()),
     node: process.version,
     tenant: TENANT.id,
@@ -85,6 +86,7 @@ app.get('/status', async (_req, res) => {
     phoneNumberId: PHONE_NUMBER_ID ? '***configured***' : 'missing',
     metaApp: META_APP_ID ? `${META_APP_ID.slice(0, 8)}...` : 'missing',
     slackEvents: !!SLACK_SIGNING_SECRET,
+    llmRSVP: !!OPENAI_API_KEY,
   });
 });
 
@@ -285,49 +287,74 @@ async function handleIncomingMessage(msg, fromPhone) {
   } catch (e) { /* ignore */ }
 }
 
-// ── Text RSVP Detection ──────────────────────────────────────
-async function handleTextRSVP(from, text) {
+// ── LLM-based RSVP Detection ─────────────────────────────────
+// Uses gpt-4o-mini to classify intent: confirm / decline / unknown
+// Falls back to negation-aware heuristic if OPENAI_API_KEY not set
+
+async function classifyRSVPIntent(text) {
+  if (!OPENAI_API_KEY) {
+    return heuristicRSVP(text);
+  }
+
+  try {
+    const res = await axios.post('https://api.openai.com/v1/chat/completions', {
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      max_tokens: 5,
+      messages: [{
+        role: 'system',
+        content: 'Clasificá el mensaje como "confirm" (SÍ asiste), "decline" (NO asiste), o "unknown" (no está claro).\n\n⚠️ "no voy" = decline. "no voy a poder" = decline. "no puedo confirmar todavía" = unknown. "sí, voy" = confirm. "dale, ahí estaré" = confirm.\n\nRespondé SOLO una palabra: confirm, decline, o unknown.'
+      }, {
+        role: 'user',
+        content: text
+      }]
+    }, {
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      }
+    });
+
+    const classification = (res.data?.choices?.[0]?.message?.content || '').trim().toLowerCase();
+    console.log(`🤖 LLM RSVP: "${text.slice(0, 80)}" → ${classification}`);
+    return classification || 'unknown';
+  } catch (err) {
+    console.error('❌ OpenAI RSVP error:', err.message);
+    return heuristicRSVP(text);
+  }
+}
+
+function heuristicRSVP(text) {
   const lower = text.toLowerCase();
 
-  // Strong confirm patterns
-  const confirmPatterns = [
-    /^(?:yo\s+)?voy|(?:yo\s+)?(?:s[íi]|si)\b.*(?:voy|asist|ir[eé])/i,
-    /confirm(?:o|ar|amos|ada|ado)/i,
-    /(?:claro|obvio|seguro|por\s+supuesto|dale|ok|okey|okay)\b.*(?:voy|asist|ir[eé])/i,
-    /all[ií]\s+estar[eé]/i,
-    /contad(?:lo|la|nos|me)\s+conmigo/i,
-    /(?:yo\s+)?me\s+(?:apunto|sumo|uno)/i,
-  ];
+  // Negation-aware: check "no" patterns FIRST
+  if (/\bno\s+(?:podr[eé]|puedo|voy\b|pasa|queda|alcanzo|creo\s+que\s+podr[eé])/i.test(lower)) return 'decline';
+  if (/\bno\s+(?:voy\s+a\s+poder|creo\s+poder|estar[eé])/i.test(lower)) return 'decline';
 
-  const declinePatterns = [
-    /no\s+(?:podr[eé]|puedo|voy|pasa|queda|alcanzo)/i,
-    /(?:l[áa]stima|pena|triste)\b.*(?:pero|no\s+pod)/i,
-    /(?:no\s+)?(?:asistir[eé]|ir[eé])/i,
-    /(?:me\s+)?(?:bajo|caigo|ausento|disculpo)/i,
-  ];
+  // Strong confirm patterns (checked AFTER negation)
+  if (/\ball[ií]\s+estar[eé]/i.test(lower)) return 'confirm';
+  if (/\bcontad(?:lo|la|nos|me)\s+conmigo/i.test(lower)) return 'confirm';
+  if (/\b(?:yo\s+)?me\s+(?:apunto|sumo)\b/i.test(lower)) return 'confirm';
+  if (/\bvoy\s+seguro|seguro\s+que\s+(?:voy|ir[eé])|confirm(?:ado|o\b|amos\b)/i.test(lower)) return 'confirm';
 
-  let rsvpStatus = null;
+  return 'unknown';
+}
 
-  for (const pattern of confirmPatterns) {
-    if (pattern.test(text)) {
-      rsvpStatus = '✅ Confirmado (texto)';
-      break;
-    }
-  }
+async function handleTextRSVP(from, text) {
+  const intent = await classifyRSVPIntent(text);
 
-  if (!rsvpStatus) {
-    for (const pattern of declinePatterns) {
-      if (pattern.test(text)) {
-        rsvpStatus = '❌ No asistirá (texto)';
-        break;
-      }
-    }
-  }
-
-  if (rsvpStatus) {
-    await saveRSVP(from, rsvpStatus, text);
-    const emoji = rsvpStatus.includes('Confirmado') ? '🎉' : '💔';
-    await notifySlack(`${emoji} *RSVP por texto* \`${from}\`: "${text.slice(0, 100)}"`);
+  if (intent === 'confirm') {
+    const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
+    await sendWhatsAppMessage(from, confirmMsg);
+    await saveRSVP(from, '✅ Confirmado (texto)', text);
+    await notifySlack(`🎉 *RSVP CONFIRMADO (LLM)* \`${from}\`: "${text.slice(0, 100)}"`);
+  } else if (intent === 'decline') {
+    const declineMsg = `Gracias por avisarnos, lo entendemos completamente 🫶\n\nTe tendremos presente ese día. ¡Un abrazo!`;
+    await sendWhatsAppMessage(from, declineMsg);
+    await saveRSVP(from, '❌ No asistirá (texto)', text);
+    await notifySlack(`💔 *NO ASISTIRÁ (LLM)* \`${from}\`: "${text.slice(0, 100)}"`);
+  } else {
+    console.log(`🤷 RSVP unknown: ${from} — "${text.slice(0, 80)}"`);
   }
 }
 
@@ -718,7 +745,7 @@ async function start() {
   }
 
   app.listen(PORT, () => {
-    console.log(`💒 claw-wedding-agent v1.4.0 running on port ${PORT}`);
+    console.log(`💒 claw-wedding-agent v1.5.0 running on port ${PORT}`);
     console.log(`   Tenant:          ${TENANT.id}`);
     console.log(`   Health:          http://localhost:${PORT}/status`);
     console.log(`   Webhook WA:      http://localhost:${PORT}/webhook`);
@@ -726,6 +753,7 @@ async function start() {
     console.log(`   WhatsApp:        ${WHATSAPP_TOKEN ? '✅ configured' : '❌ missing'}`);
     console.log(`   Slack:           ${SLACK_BOT_TOKEN && SLACK_CHANNEL_ID ? '✅ configured' : '❌ missing'}`);
     console.log(`   Slack Events:    ${SLACK_SIGNING_SECRET ? '✅ configured' : '⚠️ not configured (needed for Slack→WA)'}`);
+    console.log(`   LLM RSVP:        ${OPENAI_API_KEY ? '✅ gpt-4o-mini' : '⚠️ heuristic fallback'}`);
     console.log(`   Redis:           ${redis.status === 'ready' ? '✅ connected' : '❌ not connected'}`);
     console.log(`   Simulator:       http://localhost:${PORT}/admin/simulate-webhook`);
   });
