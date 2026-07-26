@@ -1,5 +1,5 @@
 // claw-wedding-agent — WhatsApp Wedding Planner Bot
-// v1.3 — Multi-tenant Meta App + phone-level filtering
+// v1.4.0 — Slack↔WhatsApp bidirectional + enhanced RSVP + webhook simulator
 // Repo canónico: softifycl/claw-wedding-agent
 // Mirror (Railway): alejandrochungp/claw-wedding-agent
 
@@ -19,6 +19,7 @@ const META_APP_ID = process.env.META_APP_ID || '';
 const META_APP_SECRET = process.env.META_APP_SECRET || '';
 const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || '';
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
+const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
 const WEDDING_SITE_URL = process.env.WEDDING_SITE_URL || 'https://boda.alejandro-y-kuilen.cl';
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -36,9 +37,10 @@ const redis = new Redis(REDIS_URL, {
 });
 
 const RSVP_KEY = 'wedding:rsvps';
+const CONVERSATION_KEY = 'wedding:conversations'; // phone → last interaction
+const SLACK_TS_KEY = 'wedding:slack_ts'; // wa_msg_id → slack_ts for threading
 
 redis.on('error', (err) => console.error('Redis error:', err.message));
-redis.on('connect', () => console.log('✅ Redis connected'));
 
 // ── Tenant Config ─────────────────────────────────────────────
 const TENANT = {
@@ -53,6 +55,16 @@ const TENANT = {
   saveTheDateImage: 'https://missclickpro.wordpress.com/wp-content/uploads/2025/07/portadaweb_missclick.jpg',
 };
 
+// ── Phone Formatting ─────────────────────────────────────────
+function normalizePhone(phone) {
+  // Accept +569XXXXXXXX, 569XXXXXXXX, 9XXXXXXXX
+  let cleaned = String(phone).replace(/[\s\-\(\)]/g, '');
+  if (cleaned.startsWith('+')) cleaned = cleaned.slice(1);
+  if (cleaned.startsWith('56') && cleaned.length >= 11) return `+${cleaned}`;
+  if (cleaned.startsWith('9') && cleaned.length === 9) return `+56${cleaned}`;
+  return cleaned;
+}
+
 // ── Healthcheck ──────────────────────────────────────────────
 app.get('/status', async (_req, res) => {
   let rsvpCount = 0;
@@ -62,7 +74,7 @@ app.get('/status', async (_req, res) => {
   res.json({
     status: 'ok',
     name: 'claw-wedding-agent',
-    version: '1.3.0',
+    version: '1.4.0',
     uptime: Math.floor(process.uptime()),
     node: process.version,
     tenant: TENANT.id,
@@ -72,6 +84,7 @@ app.get('/status', async (_req, res) => {
     rsvps: rsvpCount,
     phoneNumberId: PHONE_NUMBER_ID ? '***configured***' : 'missing',
     metaApp: META_APP_ID ? `${META_APP_ID.slice(0, 8)}...` : 'missing',
+    slackEvents: !!SLACK_SIGNING_SECRET,
   });
 });
 
@@ -99,7 +112,6 @@ app.post('/webhook', async (req, res) => {
       const value = change.value || {};
       const metadata = value.metadata || {};
 
-      // Phone-level filtering: only process messages for Wedding Planner number
       if (PHONE_NUMBER_ID && metadata.phone_number_id !== PHONE_NUMBER_ID) {
         console.log(`⏭️ Skipping msg for ${metadata.phone_number_id} (not ${PHONE_NUMBER_ID})`);
         continue;
@@ -114,6 +126,14 @@ app.post('/webhook', async (req, res) => {
       if (value.statuses) {
         for (const status of value.statuses) {
           console.log(`📬 Status [${status.status}]: msg ${status.id} → ${status.recipient_id}`);
+          // Forward delivery statuses to Slack
+          if (status.status === 'delivered' || status.status === 'read') {
+            const emoji = status.status === 'delivered' ? '✅' : '👀';
+            await notifySlack(`${emoji} Mensaje *${status.status}* para \`${status.recipient_id}\` (id: ${status.id})`);
+          } else if (status.status === 'failed') {
+            const errors = (status.errors || []).map(e => `${e.code}: ${e.title}`).join(', ');
+            await notifySlack(`⚠️ *FALLO DE ENTREGA* para \`${status.recipient_id}\`: ${errors}`);
+          }
         }
       }
     }
@@ -121,6 +141,93 @@ app.post('/webhook', async (req, res) => {
 
   return res.sendStatus(200);
 });
+
+// ── Slack Events Endpoint ────────────────────────────────────
+// POST /slack/events — receives messages from Slack PE channel
+// URL Challenge: Slack sends a verification request on setup
+app.post('/slack/events', async (req, res) => {
+  const body = req.body;
+
+  // Slack URL Verification (one-time challenge)
+  if (body.type === 'url_verification') {
+    console.log('✅ Slack URL verification challenge');
+    return res.json({ challenge: body.challenge });
+  }
+
+  // Acknowledge immediately (Slack requires <3s response)
+  res.sendStatus(200);
+
+  // Process events
+  if (body.type === 'event_callback') {
+    const event = body.event || {};
+
+    // Only process messages from our wedding channel
+    if (event.channel !== SLACK_CHANNEL_ID) {
+      console.log(`⏭️ Skipping Slack event from channel ${event.channel}`);
+      return;
+    }
+
+    // Skip messages from bots (including ourselves)
+    if (event.bot_id || event.subtype === 'bot_message') return;
+
+    // Only handle user messages
+    if (event.type === 'message' && event.user && event.text) {
+      await handleSlackMessage(event);
+    }
+  }
+});
+
+// ── Slack Message Handler (Slack → WhatsApp) ─────���───────────
+async function handleSlackMessage(event) {
+  const { user, text, ts, thread_ts } = event;
+  console.log(`💬 Slack [${user}]: ${text.slice(0, 100)}`);
+
+  // Parse message format: +569XXXXXXXX mensaje
+  // Or: reply in thread (thread_ts) to send to phone from that thread
+  const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  let phone = null;
+  let message = text;
+
+  if (phoneMatch) {
+    phone = normalizePhone(phoneMatch[0]);
+    message = text.replace(phoneMatch[0], '').trim();
+  } else if (thread_ts) {
+    // In thread: get the phone from the parent message's Redis mapping
+    try {
+      phone = await redis.hget(CONVERSATION_KEY, `slack:${thread_ts}`);
+    } catch (e) { /* ignore */ }
+    if (!phone) {
+      await notifySlackReply(ts, '⚠️ No encontré un número de teléfono asociado a este hilo. Escribí el mensaje con el número: `+569XXXXXXXX tu mensaje`');
+      return;
+    }
+  }
+
+  if (!phone) {
+    await notifySlackReply(ts, '⚠️ Necesito un número de teléfono. Escribí: `+569XXXXXXXX tu mensaje`');
+    return;
+  }
+
+  if (!message) {
+    await notifySlackReply(ts, '⚠️ El mensaje está vacío después del número. Escribí: `+569XXXXXXXX tu mensaje`');
+    return;
+  }
+
+  // Send the message via WhatsApp
+  const result = await sendWhatsAppMessage(phone, message);
+
+  if (result) {
+    // Store the mapping: slack thread → phone
+    try {
+      await redis.hset(CONVERSATION_KEY, `slack:${ts}`, phone);
+      await redis.expire(CONVERSATION_KEY, 86400 * 30); // 30 day TTL
+    } catch (e) { /* ignore */ }
+
+    const preview = message.length > 50 ? message.slice(0, 50) + '...' : message;
+    await notifySlackReply(ts, `📤 Enviado a \`${phone}\`: ${preview}`);
+  } else {
+    await notifySlackReply(ts, `❌ Error al enviar a \`${phone}\`. ¿El número tiene una conversación abierta en las últimas 24h?`);
+  }
+}
 
 // ── Incoming Message Handler ─────────────────────────────────
 async function handleIncomingMessage(msg, fromPhone) {
@@ -156,35 +263,89 @@ async function handleIncomingMessage(msg, fromPhone) {
   // Handle interactive button replies
   if (interactiveType === 'button') {
     await handleButtonReply(from, interactiveId, text);
-  }
-
-  // Forward ALL messages to Slack
-  if (SLACK_BOT_TOKEN && SLACK_CHANNEL_ID) {
-    await sendToSlack(from, text, timestamp, fromPhone, interactiveId);
-  }
-
-  // Auto-reply for unknown text messages
-  if (msgType === 'text') {
+  } else if (msgType === 'text') {
+    // Try to detect RSVP intent in free text
+    await handleTextRSVP(from, text);
+    // Auto-reply for common keywords
     await sendAutoReply(from, text);
+  }
+
+  // Forward to Slack with thread linking
+  if (SLACK_BOT_TOKEN && SLACK_CHANNEL_ID) {
+    await sendToSlack(from, text, timestamp, fromPhone, interactiveId, msg.wamid);
+  }
+
+  // Store conversation mapping for Slack→WA replies
+  try {
+    await redis.hset(CONVERSATION_KEY, `wa:${from}`, JSON.stringify({
+      lastMessage: text,
+      timestamp: new Date(parseInt(timestamp) * 1000).toISOString(),
+    }));
+    await redis.expire(CONVERSATION_KEY, 86400 * 30);
+  } catch (e) { /* ignore */ }
+}
+
+// ── Text RSVP Detection ──────────────────────────────────────
+async function handleTextRSVP(from, text) {
+  const lower = text.toLowerCase();
+
+  // Strong confirm patterns
+  const confirmPatterns = [
+    /^(?:yo\s+)?voy|(?:yo\s+)?(?:s[íi]|si)\b.*(?:voy|asist|ir[eé])/i,
+    /confirm(?:o|ar|amos|ada|ado)/i,
+    /(?:claro|obvio|seguro|por\s+supuesto|dale|ok|okey|okay)\b.*(?:voy|asist|ir[eé])/i,
+    /all[ií]\s+estar[eé]/i,
+    /contad(?:lo|la|nos|me)\s+conmigo/i,
+    /(?:yo\s+)?me\s+(?:apunto|sumo|uno)/i,
+  ];
+
+  const declinePatterns = [
+    /no\s+(?:podr[eé]|puedo|voy|pasa|queda|alcanzo)/i,
+    /(?:l[áa]stima|pena|triste)\b.*(?:pero|no\s+pod)/i,
+    /(?:no\s+)?(?:asistir[eé]|ir[eé])/i,
+    /(?:me\s+)?(?:bajo|caigo|ausento|disculpo)/i,
+  ];
+
+  let rsvpStatus = null;
+
+  for (const pattern of confirmPatterns) {
+    if (pattern.test(text)) {
+      rsvpStatus = '✅ Confirmado (texto)';
+      break;
+    }
+  }
+
+  if (!rsvpStatus) {
+    for (const pattern of declinePatterns) {
+      if (pattern.test(text)) {
+        rsvpStatus = '❌ No asistirá (texto)';
+        break;
+      }
+    }
+  }
+
+  if (rsvpStatus) {
+    await saveRSVP(from, rsvpStatus, text);
+    const emoji = rsvpStatus.includes('Confirmado') ? '🎉' : '💔';
+    await notifySlack(`${emoji} *RSVP por texto* \`${from}\`: "${text.slice(0, 100)}"`);
   }
 }
 
 // ── Button Reply Handler ─────────────────────────────────────
 async function handleButtonReply(from, buttonId, buttonText) {
-  // Handle both template QUICK_REPLY payloads (button text) and legacy payloads
   const isConfirm = buttonId === 'Confirmar asistencia' || buttonId === 'confirmar_asistencia';
   const isDecline = buttonId === 'No podre asistir' || buttonId === 'no_asistire';
 
   if (isConfirm) {
     const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
     await sendWhatsAppMessage(from, confirmMsg);
-    await saveRSVP(from, '✅ Confirmado', buttonText);
+    await saveRSVP(from, '✅ Confirmado (botón)', buttonText);
     await notifySlack(`🎉 *RSVP CONFIRMADO* \`${from}\``);
 
   } else if (isDecline) {
     const declineMsg = `Gracias por avisarnos, lo entendemos completamente 🫶\n\nTe tendremos presente ese día. ¡Un abrazo!`;
     await sendWhatsAppMessage(from, declineMsg);
-    await saveRSVP(from, '❌ No asistirá', buttonText);
+    await saveRSVP(from, '❌ No asistirá (botón)', buttonText);
     await notifySlack(`💔 *NO ASISTIRÁ* \`${from}\``);
   }
 }
@@ -192,19 +353,33 @@ async function handleButtonReply(from, buttonId, buttonText) {
 // ── Save RSVP to Redis ───────────────────────────────────────
 async function saveRSVP(phone, status, rawReply) {
   try {
+    // Check for existing RSVP from this phone (upsert)
+    const entries = await redis.lrange(RSVP_KEY, 0, -1);
+    let foundIdx = -1;
+    for (let i = 0; i < entries.length; i++) {
+      const e = JSON.parse(entries[i]);
+      if (e.telefono === phone) {
+        foundIdx = i;
+        break;
+      }
+    }
+
     const entry = JSON.stringify({
       timestamp: new Date().toISOString(),
       telefono: phone,
-      nombre: '',
-      apellido: '',
       rsvp: status,
-      acompanantes: '',
-      mesa: '',
       notas: rawReply || '',
+      updated: foundIdx >= 0 ? 'actualizado' : 'nuevo',
     });
-    await redis.rpush(RSVP_KEY, entry);
-    const count = await redis.llen(RSVP_KEY);
-    console.log(`📊 RSVP saved: ${phone} → ${status} (total: ${count})`);
+
+    if (foundIdx >= 0) {
+      // Replace existing entry
+      await redis.lset(RSVP_KEY, foundIdx, entry);
+      console.log(`📊 RSVP updated: ${phone} → ${status}`);
+    } else {
+      await redis.rpush(RSVP_KEY, entry);
+      console.log(`📊 RSVP saved: ${phone} → ${status} (total: ${await redis.llen(RSVP_KEY)})`);
+    }
   } catch (err) {
     console.error('❌ Redis save error:', err.message);
   }
@@ -229,15 +404,34 @@ async function notifySlack(text) {
   }
 }
 
-async function sendToSlack(from, text, timestamp, fromPhone, buttonId) {
+async function notifySlackReply(threadTs, text) {
+  if (!SLACK_BOT_TOKEN || !SLACK_CHANNEL_ID) return;
+  try {
+    await axios.post(`${SLACK_API}/chat.postMessage`, {
+      channel: SLACK_CHANNEL_ID,
+      text,
+      thread_ts: threadTs,
+      mrkdwn: true,
+    }, {
+      headers: {
+        Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+  } catch (err) {
+    console.error('Slack reply error:', err.message);
+  }
+}
+
+async function sendToSlack(from, text, timestamp, fromPhone, buttonId, wamid) {
   if (!SLACK_BOT_TOKEN || !SLACK_CHANNEL_ID) return;
   try {
     const msgTime = new Date(parseInt(timestamp) * 1000).toISOString();
-    let slackMsg = `💍 *Nuevo mensaje de boda*\n> *De:* \`${from}\`\n> *Hora:* ${msgTime}\n> *Cuenta:* ${fromPhone || 'desconocida'}`;
+    let slackMsg = `💍 *Mensaje de boda*\n> *De:* \`${from}\`\n> *Hora:* ${msgTime}\n> *Cuenta:* ${fromPhone || 'desconocida'}`;
     if (buttonId) slackMsg += `\n> *Botón:* \`${buttonId}\``;
-    slackMsg += `\n\n${text}`;
+    slackMsg += `\n\n${text}\n\n> Responde desde Slack: \`${from} tu mensaje\``;
 
-    await axios.post(`${SLACK_API}/chat.postMessage`, {
+    const slackRes = await axios.post(`${SLACK_API}/chat.postMessage`, {
       channel: SLACK_CHANNEL_ID,
       text: slackMsg,
       mrkdwn: true,
@@ -247,6 +441,18 @@ async function sendToSlack(from, text, timestamp, fromPhone, buttonId) {
         'Content-Type': 'application/json',
       },
     });
+
+    // Store Slack message TS for threading
+    if (wamid && slackRes.data?.ts) {
+      try {
+        await redis.hset(SLACK_TS_KEY, wamid, slackRes.data.ts);
+        await redis.hset(SLACK_TS_KEY, `slack_ts:${slackRes.data.ts}`, from);
+        // Map Slack thread to phone for easy replies
+        await redis.hset(CONVERSATION_KEY, `slack:${slackRes.data.ts}`, from);
+        await redis.expire(CONVERSATION_KEY, 86400 * 30);
+        await redis.expire(SLACK_TS_KEY, 86400 * 30);
+      } catch (e) { /* ignore */ }
+    }
   } catch (err) {
     console.error('Slack send error:', err.message);
   }
@@ -257,12 +463,12 @@ async function sendAutoReply(to, text) {
   let reply = null;
   const lower = text.toLowerCase();
 
-  if (/hola|buenas|info/i.test(lower)) {
+  if (/hola|buenas|ola|holi|hey|info/i.test(lower) && lower.length < 20) {
     reply = `¡Hola! 💒 Somos ${TENANT.novios.nombre1} y ${TENANT.novios.nombre2}.\n\nNos casamos el *17 de noviembre de 2026* a las *18:00* en *${TENANT.lugar}*.\n\nPronto recibirás la invitación formal. Mientras tanto, puedes visitar nuestro sitio: ${TENANT.siteUrl}`;
-  } else if (/fecha|cu[aá]ndo/i.test(lower)) {
+  } else if (/fecha|cu[aá]ndo|d[ií]a\b.*(?:boda|casamiento|evento)/i.test(lower)) {
     reply = `📅 Nos casamos el *17 de noviembre de 2026* a las *18:00*\n📍 ${TENANT.lugar}\n👗 ${TENANT.dressCode}`;
-  } else if (/confirmar|voy|asistir|rsvp/i.test(lower)) {
-    reply = `¡Gracias por confirmar! 🎉\n\nPara registrarte visita: ${TENANT.siteUrl}/rsvp\n\nO simplemente responde con tu nombre y número de acompañantes.`;
+  } else if (/lugar|d[oó]nde|ubicaci[oó]n|direcci[oó]n/i.test(lower)) {
+    reply = `📍 ${TENANT.lugar}\n\n🗺️ Google Maps: https://maps.google.com/?q=Restaurante+Meihua+Cerrillos`;
   }
 
   if (reply) {
@@ -274,7 +480,7 @@ async function sendAutoReply(to, text) {
 async function sendWhatsAppMessage(to, text) {
   if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
     console.warn('⚠️ WhatsApp not configured');
-    return;
+    return null;
   }
   try {
     const res = await axios.post(`${META_API}/${PHONE_NUMBER_ID}/messages`, {
@@ -289,10 +495,12 @@ async function sendWhatsAppMessage(to, text) {
         'Content-Type': 'application/json',
       },
     });
-    console.log(`✅ Sent to ${to}: ${res.data?.messages?.[0]?.id || 'ok'}`);
+    const msgId = res.data?.messages?.[0]?.id;
+    console.log(`✅ Sent to ${to}: ${msgId || 'ok'}`);
     return res.data;
   } catch (err) {
-    console.error(`❌ Failed to send to ${to}:`, err.response?.data || err.message);
+    const error = err.response?.data || err.message;
+    console.error(`❌ Failed to send to ${to}:`, JSON.stringify(error).slice(0, 200));
     return null;
   }
 }
@@ -301,7 +509,7 @@ async function sendWhatsAppMessage(to, text) {
 async function sendTemplate(to, templateName, params = []) {
   if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
     console.warn('⚠️ WhatsApp not configured');
-    return;
+    return null;
   }
   try {
     const bodyParams = params.map((p) => ({
@@ -338,7 +546,7 @@ async function sendTemplate(to, templateName, params = []) {
   }
 }
 
-// ── Admin Endpoints ──────────────────────────────────────────
+// ─────────────── ADMIN ENDPOINTS ──────────────────────────────
 
 app.get('/admin/config', (_req, res) => {
   res.json({
@@ -348,16 +556,20 @@ app.get('/admin/config', (_req, res) => {
       phoneNumberId: !!PHONE_NUMBER_ID,
       slackBotToken: !!SLACK_BOT_TOKEN,
       slackChannelId: !!SLACK_CHANNEL_ID,
+      slackSigningSecret: !!SLACK_SIGNING_SECRET,
       verifyToken: !!VERIFY_TOKEN,
       redis: redis.status === 'ready',
     },
+    slackEventUrl: SLACK_SIGNING_SECRET
+      ? 'https://claw-wedding-agent-production.up.railway.app/slack/events'
+      : '⚠️ Configurar SLACK_SIGNING_SECRET',
   });
 });
 
 app.post('/admin/test-message', async (req, res) => {
   const { to, text } = req.body;
   if (!to) return res.status(400).json({ error: 'Phone number required' });
-  const result = await sendWhatsAppMessage(to, text || '🧪 Mensaje de prueba — claw-wedding-agent v1.2');
+  const result = await sendWhatsAppMessage(to, text || '🧪 Mensaje de prueba — claw-wedding-agent v1.4');
   res.json({ sent: !!result, result });
 });
 
@@ -366,6 +578,93 @@ app.post('/admin/test-template', async (req, res) => {
   if (!to || !template) return res.status(400).json({ error: 'Phone and template required' });
   const result = await sendTemplate(to, template, params || []);
   res.json({ sent: !!result, result });
+});
+
+// NEW: Simulate an incoming WhatsApp webhook (for testing the full flow)
+app.post('/admin/simulate-webhook', async (req, res) => {
+  const { from, type, text, buttonId } = req.body;
+
+  if (!from) return res.status(400).json({ error: 'Phone number (from) required' });
+
+  const phone = normalizePhone(from);
+
+  if (type === 'text') {
+    const msg = { from: phone, timestamp: Math.floor(Date.now() / 1000), type: 'text', text: { body: text || 'Hola' } };
+    await handleIncomingMessage(msg, '5497 (simulado)');
+    return res.json({ ok: true, simulated: 'text', from: phone, text });
+
+  } else if (type === 'button') {
+    const btnId = buttonId || 'Confirmar asistencia';
+    const btnTitle = buttonId === 'no_asistire' || buttonId === 'No podre asistir' ? 'No podre asistir' : 'Confirmar asistencia';
+    const msg = {
+      from: phone,
+      timestamp: Math.floor(Date.now() / 1000),
+      type: 'interactive',
+      interactive: { type: 'button_reply', button_reply: { id: btnId, title: btnTitle } },
+    };
+    await handleIncomingMessage(msg, '5497 (simulado)');
+    return res.json({ ok: true, simulated: 'button', from: phone, button: btnId });
+
+  } else {
+    return res.status(400).json({ error: 'Type must be "text" or "button"' });
+  }
+});
+
+// NEW: Simulate multiple RSVPs at once (batch test)
+app.post('/admin/simulate-batch', async (req, res) => {
+  const { phones } = req.body;
+  if (!phones || !Array.isArray(phones)) return res.status(400).json({ error: 'Array of phone numbers required' });
+
+  const results = [];
+  for (const entry of phones) {
+    const phone = normalizePhone(typeof entry === 'string' ? entry : entry.phone);
+    const rsvp = entry.rsvp || '✅ Confirmado (botón)';
+
+    if (entry.rsvp === 'no') {
+      const msg = {
+        from: phone,
+        timestamp: Math.floor(Date.now() / 1000),
+        type: 'interactive',
+        interactive: { type: 'button_reply', button_reply: { id: 'No podre asistir', title: 'No podre asistir' } },
+      };
+      await handleIncomingMessage(msg, '5497 (batch)');
+      results.push({ phone, rsvp: 'declined' });
+    } else {
+      const msg = {
+        from: phone,
+        timestamp: Math.floor(Date.now() / 1000),
+        type: 'interactive',
+        interactive: { type: 'button_reply', button_reply: { id: 'Confirmar asistencia', title: 'Confirmar asistencia' } },
+      };
+      await handleIncomingMessage(msg, '5497 (batch)');
+      results.push({ phone, rsvp: 'confirmed' });
+    }
+  }
+
+  res.json({ ok: true, processed: results.length, results });
+});
+
+// NEW: Send from Slack — trigger WhatsApp message
+// Use this with Slack Outgoing Webhook or Slash Command
+app.post('/admin/send-from-slack', async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'Text required (format: +569XXXXXXXX mensaje)' });
+
+  const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  if (!phoneMatch) return res.status(400).json({ error: 'No phone number found. Format: +569XXXXXXXX mensaje' });
+
+  const phone = normalizePhone(phoneMatch[0]);
+  const message = text.replace(phoneMatch[0], '').trim();
+
+  if (!message) return res.status(400).json({ error: 'Empty message after phone number' });
+
+  const result = await sendWhatsAppMessage(phone, message);
+  res.json({
+    sent: !!result,
+    to: phone,
+    message: message.slice(0, 100),
+    result: result ? 'accepted' : 'failed',
+  });
 });
 
 // List all RSVPs
@@ -393,6 +692,22 @@ app.get('/admin/stats', async (_req, res) => {
   }
 });
 
+// NEW: Conversation info (for Slack reply context)
+app.get('/admin/conversations', async (_req, res) => {
+  try {
+    const all = await redis.hgetall(CONVERSATION_KEY);
+    const waConversations = {};
+    for (const [key, value] of Object.entries(all)) {
+      if (key.startsWith('wa:')) {
+        waConversations[key.slice(3)] = JSON.parse(value);
+      }
+    }
+    res.json({ total: Object.keys(waConversations).length, conversations: waConversations });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ───────────────────────────────────────────────────
 async function start() {
   try {
@@ -403,14 +718,16 @@ async function start() {
   }
 
   app.listen(PORT, () => {
-    console.log(`💒 claw-wedding-agent v1.2 running on port ${PORT}`);
-    console.log(`   Tenant:    ${TENANT.id}`);
-    console.log(`   Health:    http://localhost:${PORT}/status`);
-    console.log(`   Webhook:   http://localhost:${PORT}/webhook`);
-    console.log(`   WhatsApp:  ${WHATSAPP_TOKEN ? '✅ configured' : '❌ missing'}`);
-    console.log(`   Slack:     ${SLACK_BOT_TOKEN && SLACK_CHANNEL_ID ? '✅ configured' : '❌ missing'}`);
-    console.log(`   Redis:     ${redis.status === 'ready' ? '✅ connected' : '❌ not connected'}`);
-    console.log(`   Site:      ${TENANT.siteUrl}`);
+    console.log(`💒 claw-wedding-agent v1.4.0 running on port ${PORT}`);
+    console.log(`   Tenant:          ${TENANT.id}`);
+    console.log(`   Health:          http://localhost:${PORT}/status`);
+    console.log(`   Webhook WA:      http://localhost:${PORT}/webhook`);
+    console.log(`   Webhook Slack:   http://localhost:${PORT}/slack/events`);
+    console.log(`   WhatsApp:        ${WHATSAPP_TOKEN ? '✅ configured' : '❌ missing'}`);
+    console.log(`   Slack:           ${SLACK_BOT_TOKEN && SLACK_CHANNEL_ID ? '✅ configured' : '❌ missing'}`);
+    console.log(`   Slack Events:    ${SLACK_SIGNING_SECRET ? '✅ configured' : '⚠️ not configured (needed for Slack→WA)'}`);
+    console.log(`   Redis:           ${redis.status === 'ready' ? '✅ connected' : '❌ not connected'}`);
+    console.log(`   Simulator:       http://localhost:${PORT}/admin/simulate-webhook`);
   });
 }
 
