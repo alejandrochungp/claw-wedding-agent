@@ -63,10 +63,13 @@ Invitado (WhatsApp) → Meta Cloud API → Webhook → claw-wedding-agent (Railw
 ```
 
 ### Cambios requeridos
-1. **Suscribir la app Wedding Planner al WABA** (bloqueante)
-2. **Migrar LLM de Claude → DeepSeek** (`deepseek-chat`, api.deepseek.com) — cumple regla + ~10x más barato
+1. **Suscribir la app Wedding Planner al WABA** (bloqueante) — ⚠️ ACTUALIZADO 02-Ago 11:41: Alejandro creó la app nueva `1590375222487560` (configurada como Softify, conectada al WABA, asignada al system user `61566630796479`). Verificado: el token almacenado SÍ accede a la app (`GET /1590375222487560?fields=name` → OK). Falta verificar suscripción de webhooks con el token de esa app.
+2. **LLM = DeepSeek Flash** (decisión Alejandro 02-Ago): el bot de boda usa **DeepSeek Flash** (`deepseek-v4-flash` / `deepseek-chat`). **NO tocar Claude Sonnet en proyectos anteriores (Yeppo/Softify).** El server.js actual del agente usa `claude-sonnet-4-6` — migrar a DeepSeek Flash cuando se implemente el bot LLM.
 3. **Configurar Slack bidireccional**: `SLACK_SIGNING_SECRET` + canal dedicado `#wedding-planner`
 4. **Flujo completo**: template → botón → RSVP → Redis → Slack → respuesta LLM
+
+### URLs en botones (decisión Alejandro 02-Ago)
+Los botones de "Confirmar asistencia" / "No podre asistir" deben ser **botones URL** (no quick reply) que redirijan a la página de confirmación/no confirmación del sitio del producto, para que los invitados también conozcan el producto. Requiere: sitio web en `noscasamos.vip` funcionando → crear templates nuevos con URL buttons.
 
 ---
 

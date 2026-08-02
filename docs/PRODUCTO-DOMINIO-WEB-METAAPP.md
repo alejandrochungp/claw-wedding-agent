@@ -16,7 +16,7 @@
 | Expira | 2028-08-02 (2 años, renovación automática ON) |
 | Registrar lock | ON (`locked: true`) |
 | Privacy WHOIS | ON (`privacy: true`) |
-| Nameservers actuales | `ns09.domaincontrol.com`, `ns10.domaincontrol.com` (GoDaddy default) |
+| Nameservers actuales | **`ns1.bluehost.com`, `ns2.bluehost.com`** (CAMBIADOS 02-Ago 11:50 ✅ vía API GoDaddy) |
 | Titular | Alejandro Chung (a.chungpark@gmail.com, +56.966283141) |
 | Auth code | Disponible vía API (no exponer) |
 | API key/secret | `.secrets/godaddy_api.json` ✅ accesible |
@@ -97,44 +97,50 @@ O link del micrositio de la boda: `https://alejandro-kuilen.noscasamos.vip`
 
 ---
 
-## 4. Nueva Meta App: 1590375222487560 ⚠️ (verificación pendiente)
+## 4. Nueva Meta App: 1590375222487560 ✅ (acceso CONFIRMADO 02-Ago 11:41)
 
 ### Lo que reportó Alejandro
 - Nueva app de desarrollador Meta creada (la anterior no tenía el modo de uso correcto para WhatsApp)
 - Configurada **igual que la app de Softify** (modo de uso WhatsApp ✅)
 - Conectada al WhatsApp Business (WABA)
-- Asignada al System User
+- Asignada al System User `61566630796479`
 - ID: `1590375222487560`
 
-### Verificación realizada (02-Ago 11:30)
+### Verificación realizada (02-Ago 11:30-11:41)
 | Check | Resultado |
 |-------|-----------|
-| Acceso con system user token de Softify (`EAAX...`) | ❌ Error subcode 33 (sin permisos) — el token actual pertenece a la app Softify (`1636363614308117`), no ve la app nueva |
-| `GET /1590375222487560` | ❌ No accesible con token actual |
-| `GET /1590375222487560/subscriptions` | ❌ No accesible con token actual |
-| `GET /1004041115557689/subscribed_apps` | ⚠️ Solo aparece Softify — la app nueva aún NO está suscrita al WABA (o el token no la ve) |
+| `GET /1590375222487560?fields=name` con token almacenado | ✅ **OK** — el token del system user (Softify) SÍ accede a la app nueva |
+| `GET /1590375222487560/subscriptions` | ⚠️ Requiere app token (error subcode 33) — normal, no es acceso de system user |
+| `GET /1004041115557689/subscribed_apps` | ⚠️ Solo aparece Softify — falta que la app nueva se suscriba al WABA (o verificar con token de la app nueva) |
 | Phone numbers WABA | 5497 (Programa Emprender) VERIFIED ✅ / 3050 (Aconcagua) EXPIRED |
 
-### Pendiente para acceder
-1. **Token de la app nueva:** Alejandro debe generar un System User token **para la app `1590375222487560`** (Business Settings → System Users → la app nueva → Generate Token) con scopes: `whatsapp_business_management`, `business_management`, `whatsapp_business_messaging`
-2. Con ese token: verificar `subscribed_apps` y suscribir la app al WABA si hace falta
-3. Verificar webhook URL del agente apuntando a la app nueva
-4. Si la app nueva reemplaza a la Wedding Planner (`1261291912568631`), actualizar credenciales en `.secrets/` y Railway env vars
-
-> El token de Softify no sirve para la app nueva — cada app tiene su propio token de system user. Cuando Alejandro genere el token de la app nueva, lo guardamos en `.secrets/` y verifico acceso.
+### Conclusión
+El token almacenado accede a la app nueva ✅. Falta: verificar/crear la suscripción de la app nueva al WABA (para que los webhooks de botones lleguen al agente). Pendiente: confirmar si la app nueva reemplaza a `1261291912568631` (Wedding Planner reciclada) y actualizar Railway env vars.
 
 ---
 
-## 5. Acciones pendientes (nada ejecutado aún)
+## 5. Acciones pendientes (ejecución parcial 02-Ago)
 
-- [ ] Generar System User token de la app `1590375222487560` → pasarlo a Claw
-- [ ] Verificar acceso + suscripción WABA con el token nuevo
-- [ ] Decidir hosting Bluehost: ¿cPanel existente o nuevo plan?
-- [ ] Cambiar DNS noscasamos.vip → Bluehost (NS o A record)
-- [ ] Crear sitio producto + micrositio boda (estructura sección 3)
-- [ ] Agregar URL a templates (verificar regla Meta de URLs en body)
-- [ ] Migrar LLM Claude → DeepSeek (regla permanente)
+### ✅ Ejecutado (02-Ago 11:50)
+- [x] **Cambiar DNS noscasamos.vip → Bluehost**: NS actualizados a `ns1.bluehost.com` / `ns2.bluehost.com` vía API GoDaddy (verificado: PATCH OK + GET confirma)
+
+### ⚠️ Bloqueante: addon domain en Bluehost
+El cPanel de Bluehost (cuenta `tupiboxc`, sh00634) **no expone creación de addon domains vía API**:
+- `uapi Domain addon_domain` → función no existe (módulo Domain es stub vacío)
+- `cpapi2 Domain addondomain` → no existe
+- `uapi DomainTemplates` → módulo no instalado
+- Solo existe `SubDomain::addsubdomain` (crea subdominios de dominios ya existentes)
+
+**Opciones:** (A) Alejandro crea el addon domain en cPanel UI (Domains → Create A New Domain, ~2 min), (B) dar acceso cPanel (password/API token) a Claw, (C) verificar si hay otra vía (whmapi necesita root).
+
+### Pendientes
+- [ ] Crear addon domain `noscasamos.vip` en cPanel Bluehost
+- [ ] Crear subdominio por boda (`alejandro-kuilen.noscasamos.vip`) vía `uapi SubDomain addsubdomain` (disponible ✅)
+- [ ] Subir sitio producto + micrositio boda (estructura sección 3)
+- [ ] Crear templates nuevos con botones URL → páginas de confirmación/no confirmación en noscasamos.vip
+- [ ] Verificar suscripción de la app nueva `1590375222487560` al WABA
 - [ ] Probar flujo completo: template → botón → webhook → RSVP → Slack
+- [ ] Implementar bot LLM con DeepSeek Flash (server.js actual usa Claude — migrar)
 
 ## Archivos relacionados
 - `docs/PROPUESTA-BOT-LLM-PRODUCTO.md` — propuesta bot LLM + monetización
