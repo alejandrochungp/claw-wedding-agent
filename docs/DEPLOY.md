@@ -59,14 +59,30 @@ WABA 1004041115557689
 | WhatsApp Token | `EAAXQQ5f0RxU...` |
 | Archivo | `.secrets/softify_meta_app.txt` |
 
-### Meta App Wedding Planner (reciclada 25-Jul-2026)
+### Meta App Wedding Planner v2 (creada 02-Ago-2026) ✅ ACTUAL
 | Campo | Valor |
 |-------|-------|
-| App ID | `1261291912568631` |
-| App Secret | `118b4faddf91c211a13c166b58cb9c14` |
+| App ID | `1590375222487560` |
+| App Secret | `9f2ac26c72733fd7a771b6b858cad3de` |
 | WABA ID | `1004041115557689` (compartido) |
 | Phone Number ID | `1268610086327579` (+56994635497) |
-| Archivo | `.secrets/wedding_meta_app.txt` |
+| System User | `61590110639479` (employee) |
+| Archivos | `.secrets/wedding_meta_app_v2.txt`, `.secrets/wedding_meta_app_v2_token.txt` |
+| Suscripción WABA | ✅ `POST /1004041115557689/subscribed_apps` (02-Ago) |
+| Webhook | ✅ `claw-wedding-agent-production.up.railway.app/webhook` + campo `messages` v26.0 |
+| Reemplaza a | `1261291912568631` (app reciclada, descartada) |
+
+### Railway (proyecto CORRECTO — separado de Yeppo/Softify)
+| Campo | Valor |
+|-------|-------|
+| Proyecto | `claw-wedding-agent` |
+| Project ID | `fca8623e-d99c-40be-89e6-619957ab189d` |
+| Service ID | `8ab66ea2-366b-4155-928e-0163df175c5a` |
+| URL | `https://railway.com/project/fca8623e-d99c-40be-89e6-619957ab189d` |
+| Project Token | `23f5f6ec-f449-4f81-954d-881a5c9c0767` → `.secrets/railway_wedding_project_token.txt` |
+| Dominio público | `claw-wedding-agent-production.up.railway.app` |
+
+> ⚠️ **Lección 02-Ago:** el servicio estaba originalmente en el proyecto `claw-whatsapp-webook` (c43915bc, de Yeppo/Softify) — por eso las respuestas salían desde otro teléfono. Alejandro creó proyecto separado `fca8623e`. NUNCA mezclar servicios de distintos negocios en el mismo proyecto Railway.
 
 ## 📋 Diagnóstico 25-Jul-2026 — Resuelto
 

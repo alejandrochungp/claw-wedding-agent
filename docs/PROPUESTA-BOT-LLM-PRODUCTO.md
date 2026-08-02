@@ -90,11 +90,13 @@ Los botones de "Confirmar asistencia" / "No podre asistir" deben ser **botones U
 - Suscripción: `POST /1004041115557689/subscribed_apps` con token de la app v2 → success
 - Webhook: `POST /{app_id}/subscriptions` con app token (client credentials) → fields [messages] v26.0
 
-### Fase 2 — Migrar LLM a DeepSeek Flash (estilo Yeppo) ⬅️ SIGUIENTE
-- Reemplazar `CLAUDE_API_KEY`/`claude-sonnet-4-6` por `DEEPSEEK_API_KEY`/`deepseek-chat` en `src/server.js`
-- Usar el patrón de `projects/softify-whatsapp-webhook/core/ai.js`: DeepSeek primario, timeout 10-15s, fallback a heurística local si falla, **sin fallback a Claude** (regla permanente)
-- Modelo: `deepseek-chat` (DeepSeek Flash)
-- Prompt del bot boda: contexto (fecha, hora por confirmar, lugar Meihua, boda China/Coreana, dress code semi formal)
+### Fase 2 — Migrar LLM a DeepSeek Flash (estilo Yeppo) ✅ COMPLETADA (02-Ago 13:26)
+- `server.js`: `classifyRSVPIntent` + auto-replies migrados de Claude → DeepSeek Flash (`deepseek-chat`)
+- Endpoint: `https://api.deepseek.com/v1/chat/completions` (patrón de `projects/softify-whatsapp-webhook/core/ai.js`)
+- Sin fallback a Claude (regla permanente 18-Jul-2026)
+- Env vars Railway actualizadas: `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL=deepseek-chat`
+- Commit `2234c0c` → deploy verificado (llmRSVP: true)
+- ⚠️ Importante: proyectos anteriores (Yeppo/Softify) MANTIENEN Claude Sonnet — decisión Alejandro, no tocar
 
 ### Fase 3 — Slack bidireccional
 - Configurar `SLACK_SIGNING_SECRET` en Railway (lo tiene Mateo)
