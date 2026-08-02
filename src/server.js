@@ -50,8 +50,10 @@ const TENANT = {
   novios: { nombre1: 'Alejandro', nombre2: 'Kuilen' },
   fecha: '2026-11-17',
   hora: '18:00',
+  horaNota: 'Sujeto a modificaciones. Por confirmar',
+  tipoCelebracion: 'Boda China / Coreana',
   lugar: 'Restaurante Meihua, Av. Pedro Aguirre Cerda 5761, Cerrillos',
-  dressCode: 'Formal / Temática China-Coreana',
+  dressCode: 'Semi Formal',
   siteUrl: WEDDING_SITE_URL,
   calendarUrl: 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=Boda+Alejandro+y+Kuilen&dates=20261117T210000Z/20261118T030000Z&details=Boda+de+Alejandro+y+Kuilen+-+Restaurante+Meihua&location=Restaurante+Meihua,+Av.+Pedro+Aguirre+Cerda+5761,+Cerrillos,+Santiago',
   saveTheDateImage: 'https://missclickpro.wordpress.com/wp-content/uploads/2025/07/portadaweb_missclick.jpg',
@@ -341,7 +343,7 @@ async function handleTextRSVP(from, text) {
   const intent = await classifyRSVPIntent(text);
 
   if (intent === 'confirm') {
-    const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
+    const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs (${TENANT.horaNota})\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
     await sendWhatsAppMessage(from, confirmMsg);
     await saveRSVP(from, '✅ Confirmado (texto)', text);
     await notifySlack(`🎉 *RSVP CONFIRMADO (LLM)* \`${from}\`: "${text.slice(0, 100)}"`);
@@ -410,7 +412,7 @@ async function handleButtonReply(from, buttonId, buttonText) {
   const isDecline = buttonId === 'No podre asistir' || buttonId === 'no_asistire';
 
   if (isConfirm) {
-    const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
+    const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs (${TENANT.horaNota})\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
     await sendWhatsAppMessage(from, confirmMsg);
     await saveRSVP(from, '✅ Confirmado (botón)', buttonText);
     await notifySlack(`🎉 *RSVP CONFIRMADO* \`${from}\``);
@@ -537,9 +539,9 @@ async function sendAutoReply(to, text) {
   const lower = text.toLowerCase();
 
   if (/hola|buenas|ola|holi|hey|info/i.test(lower) && lower.length < 20) {
-    reply = `¡Hola! 💒 Somos ${TENANT.novios.nombre1} y ${TENANT.novios.nombre2}.\n\nNos casamos el *17 de noviembre de 2026* a las *18:00* en *${TENANT.lugar}*.\n\nPronto recibirás la invitación formal. Mientras tanto, puedes visitar nuestro sitio: ${TENANT.siteUrl}`;
+    reply = `¡Hola! 💒 Somos ${TENANT.novios.nombre1} y ${TENANT.novios.nombre2}.\n\nNos casamos el *17 de noviembre de 2026* a las *${TENANT.hora}* (${TENANT.horaNota}) en *${TENANT.lugar}*.\n\n🎎 Celebración boda China / Coreana — dress code *${TENANT.dressCode}*.\n\nPronto recibirás la invitación formal. Mientras tanto, puedes visitar nuestro sitio: ${TENANT.siteUrl}`;
   } else if (/fecha|cu[aá]ndo|d[ií]a\b.*(?:boda|casamiento|evento)/i.test(lower)) {
-    reply = `📅 Nos casamos el *17 de noviembre de 2026* a las *18:00*\n📍 ${TENANT.lugar}\n👗 ${TENANT.dressCode}`;
+    reply = `📅 Nos casamos el *17 de noviembre de 2026* a las *${TENANT.hora}* (${TENANT.horaNota})\n📍 ${TENANT.lugar}\n👗 ${TENANT.dressCode}`;
   } else if (/lugar|d[oó]nde|ubicaci[oó]n|direcci[oó]n/i.test(lower)) {
     reply = `📍 ${TENANT.lugar}\n\n🗺️ Google Maps: https://maps.google.com/?q=Restaurante+Meihua+Cerrillos`;
   }

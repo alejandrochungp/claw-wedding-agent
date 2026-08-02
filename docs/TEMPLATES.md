@@ -126,7 +126,9 @@ Los detalles te llegan después con la invitación formal. Por ahora solo dime s
 Foto de la pareja por **Missclick Pro**:
 `https://missclickpro.wordpress.com/wp-content/uploads/2025/07/portadaweb_missclick.jpg`
 
-**Media ID para envío:** `1592980732290849`
+**Media ID para envío:** `1592980732290849` (original, EXPIRADO/INVÁLIDO desde 02-Ago)
+
+> ⚠️ **Lección 02-Ago-2026:** El archivo `tmp/portadaweb_missclick.jpg` y la URL de WordPress devuelven HTML corrupto (no JPEG). El header_handle del template sirve el mismo blob corrupto. Para enviar v3: usar **SIEMPRE** `projects/boda-china-2026/foto-pareja-save-the-date.jpg` (JPEG RGB válido 3241×2160), subir fresco al phone `/media` y usar ese media_id. Los 4 envíos con imagen inválida fallaron con error 131053 "Image is invalid" (visible en logs webhook de Railway).
 
 ### Body
 ```

@@ -206,6 +206,46 @@ Resumen:
 5. Verificar `can_send_message: AVAILABLE`
 6. Reanudar envíos
 
+---
+
+## Actualización 29-Jul-2026 — 20:46
+
+### Business Verification Check
+
+Se verificó el estado actual del BUSINESS tras 3 días corridos desde la subida de documentos (26-Jul):
+
+```
+can_send_message: LIMITED
+├── PHONE_NUMBER (1268610086327579): AVAILABLE ✅
+│   └── quality_rating: GREEN
+│   └── code_verification_status: VERIFIED
+│   └── verified_name: "Programa Emprender"
+├── WABA (1004041115557689): AVAILABLE ✅
+├── BUSINESS (2065338583688337): LIMITED ⚠️
+│   └── error 141010: "The Business has not passed business verification"
+│   └── verification_status: pending
+└── APP (1636363614308117 Softify): AVAILABLE ✅
+```
+
+### Conclusión
+La verificación sigue `pending`. El ETA original era ~28-Jul (2 días hábiles desde 26-Jul). Ya hay 1 día de atraso respecto al ETA. Próximo hito: 30-Jul (jueves).
+
+### Test send a Alejandro + Kuilen (20:49)
+
+Se envió `save_the_date_v3` a ambos destinatarios:
+
+| Destinatario | Número | Message ID | API Status | ¿Recibido? |
+|---|---|---|---|---|
+| Alejandro | 56966283141 | `wamid...xRjRCRUQwM0U1NUI1QTczMkYA` | accepted (200) | ⏳ Sin confirmar |
+| Kuilen | 56956375085 | `wamid...jc0QTJGNUQ2QTQxOEExRjMA` | accepted (200) | ⏳ Sin confirmar |
+
+**Nota:** Media ID usado: `1395140095820649` (misma imagen Missclick de templates previos). Template `save_the_date_v3` con header IMAGE.
+
+### Próximo paso
+Si los mensajes NO se entregan → seguir esperando Business Verification. Si SÍ se entregan → el bloqueo se levantó parcialmente y se puede proceder con envíos masivos.
+
+---
+
 ## Archivos Relacionados
 - `memory/2026-05-01.md` — Campaña BTS ARIRANG (método original Resumable Upload API)
 - `memory/2026-07-25.md` — Timeline completo del día

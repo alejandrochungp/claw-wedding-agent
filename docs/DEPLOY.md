@@ -1,7 +1,7 @@
 # Guía de Deploy — claw-wedding-agent
 
 > Basado en la arquitectura probada de `claw-whatsapp-agent` (Softify) en Railway.
-> **Última actualización:** 25-Jul-2026 18:14 CLT
+> **Última actualización:** 26-Jul-2026 14:35 CLT — Migración Claude v1.6.0
 
 ## 📊 Estado Actual
 
@@ -10,9 +10,9 @@
 | Repo GitHub | ✅ | `softifycl/claw-wedding-agent` (canonical) |
 | Mirror GitHub | ✅ | `alejandrochungp/claw-wedding-agent` (commit `5c561c0`) |
 | Railway Service | ✅ | `claw-wedding-agent` ONLINE en `claw-whatsapp-webook` |
-| Railway Deploy | ✅ | v1.3.0 desplegada con phone filtering + Meta App separada |
-| Server.js | ✅ | v1.3.0 — WhatsApp + Slack + templates + Redis RSVP + QUICK_REPLY + phone filtering |
-| Env Vars Railway | ✅ | 8/8 configuradas (incluye META_APP_ID y META_APP_SECRET) |
+| Railway Deploy | ✅ | v1.6.0 — Claude RSVP + auto-replies + Slack↔WA bridge |
+| Server.js | ✅ | v1.6.0 — Claude (claude-sonnet-4-6) + Slack Events + RSVP LLM + auto-reply |
+| Env Vars Railway | ✅ | 10/10 configuradas (incluye CLAUDE_API_KEY + CLAUDE_MODEL) |
 | Redis | ✅ | Railway Redis nativo — conexión funcionando |
 | Webhook Verification | ✅ | Verificado con `VERIFY_TOKEN` real |
 | Meta App Softify | ✅ | App `1636363614308117` — webhook → `softify-...railway.app` |
@@ -90,7 +90,7 @@ Diagnóstico anterior de `platform_type: NOT_APPLICABLE` y `#133010` estaba equi
 - 5497: status CONNECTED, platform_type CLOUD_API, code_verification VERIFIED ✅
 - 3050: status CONNECTED, platform_type CLOUD_API, code_verification EXPIRED (pero funciona) ✅
 
-## 🚀 Railway Env Vars (8/8)
+## 🚀 Railway Env Vars (10/10)
 
 | Variable | Valor | Nota |
 |----------|-------|------|
@@ -102,19 +102,32 @@ Diagnóstico anterior de `platform_type: NOT_APPLICABLE` y `#133010` estaba equi
 | `SLACK_CHANNEL_ID` | `C0BK70984TZ` | Canal PE |
 | `META_APP_ID` | `1261291912568631` | Wedding Planner Meta App |
 | `META_APP_SECRET` | `118b4faddf91c211a13c166b58cb9c14` | Wedding Planner App Secret |
+| `CLAUDE_API_KEY` | `sk-ant…UwAA` | Anthropic API (mismo que Yeppo) |
+| `CLAUDE_MODEL` | `claude-sonnet-4-6` | Modelo Claude (mismo que chatbot Yeppo) |
 
-## 🔗 Endpoints
+### Pendientes de configurar
+
+| Variable | Prioridad | Bloquea |
+|----------|-----------|---------|
+| `SLACK_SIGNING_SECRET` | 🟡 P1 | Slack Events API bidireccional |
+
+## 🔗 Endpoints (v1.6.0)
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/status` | Healthcheck (versión, Redis, RSVP count) |
+| GET | `/status` | Healthcheck (version, redis, llmRSVP, uptime) |
 | GET | `/webhook` | Meta webhook verification |
 | POST | `/webhook` | Meta webhook event handler |
-| GET | `/admin/config` | Tenant + configuración |
-| POST | `/admin/test-message` | Enviar mensaje de prueba `{to, text}` |
-| POST | `/admin/test-template` | Enviar template `{to, template, params}` |
+| POST | `/slack/events` | Slack Events API (pendiente SLACK_SIGNING_SECRET) |
+| GET | `/admin/config` | Tenant + configuración actual |
 | GET | `/admin/rsvps` | Listar todos los RSVPs |
 | GET | `/admin/stats` | Estadísticas (confirmados, rechazados, pendientes) |
+| POST | `/admin/test-message` | Enviar mensaje de prueba `{to, text}` |
+| POST | `/admin/test-template` | Enviar template `{to, template, params}` |
+| POST | `/admin/send-from-slack` | Enviar WhatsApp desde Slack (manual) |
+| POST | `/admin/simulate-webhook` | Simular mensaje entrante de WhatsApp |
+| POST | `/admin/simulate-batch` | Simular múltiples RSVPs a la vez |
+| GET | `/admin/conversations` | Ver mapeo Slack↔WhatsApp |
 
 Dominio público: `https://claw-wedding-agent-production.up.railway.app`
 
@@ -129,11 +142,13 @@ git push mirror master    # alejandrochungp/claw-wedding-agent (Railway)
 
 ## ⚠️ Pendientes
 
-1. **Probar envío desde número 5497** — una vez que el template `save_the_date` sea aprobado por Meta
-2. **Añadir imagen al template** — HEADER TEXT → HEADER IMAGE con `portadaweb_missclick.jpg`
-3. **Probar flujo completo de RSVP** — enviar WhatsApp → botones → Redis → Slack PE
+1. **Esperar aprobación Business Verification** — documentos subidos 26-Jul ~09:55, ETA ~28-Jul
+2. **Probar flujo completo de RSVP con Claude** — una vez que se levante el bloqueo 141010
+3. **Probar `generateAndSendClaudeReply()`** — auto-replies conversacionales para mensajes no-RSVP
 4. **Someter 7 templates restantes** — `recordatorio_7d`, `recordatorio_24h`, `invitacion_formal`, etc.
 5. **Sitio web nupcial** — GitHub Pages con 5 páginas estáticas
+6. **Crear canal #wedding-planner en Slack PE** — invitar a @Mateo y configurar `SLACK_CHANNEL_ID`
+7. **Obtener `SLACK_SIGNING_SECRET` de Mateo** — para activar Slack Events API bidireccional
 
 ## 📚 Referencias
 
@@ -143,4 +158,10 @@ git push mirror master    # alejandrochungp/claw-wedding-agent (Railway)
 - **Templates:** `projects/wedding-planner/docs/TEMPLATES.md`
 - **Flows:** `projects/wedding-planner/docs/FLOWS.md`
 - **Website:** `projects/wedding-planner/docs/WEBSITE.md`
-- **Secrets:** `.secrets/wedding_meta_app.txt`, `.secrets/softify_meta_app.txt`, `.secrets/softify_wa_token.txt`
+- **Claude Engine:** `projects/wedding-planner/docs/CLAUDE_REPLY_ENGINE.md` ← v1.6.0
+- **SLA & Runbook:** `projects/wedding-planner/docs/SLA_RUNBOOK.md` ← v1.6.0
+- **Changelog:** `projects/wedding-planner/docs/CHANGELOG.md`
+- **WhatsApp Debug:** `projects/wedding-planner/docs/WHATSAPP_DEBUG.md`
+- **Business Verification:** `projects/wedding-planner/docs/BUSINESS_VERIFICATION.md`
+- **Resumable Upload:** `projects/wedding-planner/docs/RESUMABLE_UPLOAD_API.md`
+- **Secrets:** `.secrets/wedding_meta_app.txt`, `.secrets/softify_meta_app.txt`, `.secrets/claude_yeppo_key.txt`

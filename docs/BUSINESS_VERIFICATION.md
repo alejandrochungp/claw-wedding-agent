@@ -69,7 +69,17 @@ Respuesta indicativa:
 
 ## Estado Actual
 
-**26-Jul-2026 09:55:** Alejandro subió los documentos de verificación del negocio al Meta Business Manager. Tiempo estimado de revisión: **2 días hábiles** (resolución esperada ~28-Jul-2026).
+| Fecha | Hito |
+|---|---|
+| 26-Jul 09:55 | Documentos subidos a Meta Business Manager |
+| 28-Jul | ETA original de resolución (2 días hábiles) |
+| 29-Jul 20:46 | Chequeo: `verification_status: pending`, error 141010 persiste |
+| 29-Jul 20:49 | Test send a Alejandro + Kuilen — ambos `accepted`, entrega sin confirmar |
+| 02-Ago 06:10 | Chequeo vía Graph API directo al business object: `verification_status: pending` persiste (7 días corridos desde subida docs) |
+
+**29-Jul-2026 20:46:** Business Verification sigue `pending`. El ETA original de 2 días hábiles ya venció (~28-Jul). Próximo hito: 30-Jul.
+
+**02-Ago-2026 06:10:** Sigue `pending` (verificado consultando `GET /2065338583688337?fields=name,verification_status` — respuesta: `Aconcagua Capital SpA`, `verification_status: pending`). El endpoint `whatsapp_business_health` devuelve error 2500 "Unknown path components" en v21/v22/v23 tanto para phone IDs como para WABA (no accesible con el system user token de Softify). Dato adicional: el phone +56 9 4170 3050 (Softify/Aconcagua) tiene `code_verification_status: EXPIRED` — posible impacto en envíos de Softify. El phone de boda +56 9 9463 5497 sigue `VERIFIED` con quality GREEN.
 
 ## Cómo Resolverlo
 

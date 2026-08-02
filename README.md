@@ -122,9 +122,12 @@ wedding-planner/
 - [x] Configurar 5 env vars en Railway (PHONE_NUMBER_ID, SLACK_BOT_TOKEN, SLACK_CHANNEL_ID, VERIFY_TOKEN, WHATSAPP_TOKEN)
 - [x] Webhook Meta cambiado a `claw-wedding-agent-production.up.railway.app/webhook`
 - [x] Webhook verificado con VERIFY_TOKEN real — devuelve challenge ✅
-- [x] server.js v1.1.0 — WhatsApp handling + Slack forwarding + auto-reply + templates
+- [x] server.js v1.6.0 — Claude RSVP (claude-sonnet-4-6) + auto-replies + Slack↔WA bridge
 - [x] Slack canal `#C0BK70984TZ` (PE) configurado para forward de mensajes
-- [ ] Crear y aprobar 8 templates Meta (~48h)
+- [x] 3 templates Meta aprobados: `save_the_date` (v1, v2 TEXT, v3 IMAGE)
+- [x] Migración OpenAI → Claude (claude-sonnet-4-6, mismo modelo Yeppo)
+- [x] Docs: CLAUDE_REPLY_ENGINE.md, SLA_RUNBOOK.md, CHANGELOG.md
+- [x] Railway 10/10 env vars (CLAUDE_API_KEY + CLAUDE_MODEL agregados)
 - [ ] Sitio web estático base (HTML/CSS template nupcial)
 
 ### Fase 2 — Flujo Core (Sprint 2)
