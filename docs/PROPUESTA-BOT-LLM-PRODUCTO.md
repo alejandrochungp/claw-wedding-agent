@@ -75,23 +75,25 @@ Los botones de "Confirmar asistencia" / "No podre asistir" deben ser **botones U
 
 ## 3. Plan de Implementación (Fases)
 
-### Fase 1 — Desbloquear webhooks (hoy, ~15 min)
-| Paso | Acción | Responsable |
-|------|--------|-------------|
-| 1.1 | Conectar app Wedding Planner (`1261291912568631`) al WABA `1004041115557689` | Alejandro (UI) o token system user de esa app |
-| 1.2 | Verificar `GET /{waba_id}/subscribed_apps` muestra ambas apps | Claw |
-| 1.3 | Test real: enviar template → tocar botón → verificar RSVP en Redis + notif Slack | Alejandro + Claw |
+### Fase 1 — Desbloquear webhooks ✅ COMPLETADA (02-Ago 13:10)
+| Paso | Acción | Estado |
+|------|--------|--------|
+| 1.1 | Conectar app Wedding Planner v2 (`1590375222487560`) al WABA `1004041115557689` | ✅ Suscrita vía API (success) |
+| 1.2 | Configurar webhook con campo `messages` → `claw-wedding-agent-production.up.railway.app/webhook` | ✅ Verificado (v26.0) |
+| 1.3 | Test real: template → botón → RSVP en Redis + respuesta WhatsApp | ✅ VERIFICADO 13:10 (RSVP confirmado) |
+| 1.4 | Fix parsing `type: "button"` (quick replies) | ✅ Commit `d48df60` |
 
-**Opción A (UI):** WhatsApp Manager → Account tools → WhatsApp Business Accounts → WABA → Apps conectadas → agregar app 1261291912568631.
-**Opción B (API):** Generar System User token de la app Wedding Planner en Business Settings → System Users → asignar WABA → pasar token a Claw → `POST /{waba_id}/subscribed_apps` con ese token.
+**Detalles Fase 1:**
+- App nueva creada por Alejandro: `1590375222487560` "Wedding Planner v2" (configurada como Softify)
+- System user employee `61590110639479` (token en `.secrets/wedding_meta_app_v2_token.txt`)
+- App Secret en `.secrets/wedding_meta_app_v2.txt`
+- Suscripción: `POST /1004041115557689/subscribed_apps` con token de la app v2 → success
+- Webhook: `POST /{app_id}/subscriptions` con app token (client credentials) → fields [messages] v26.0
 
-### Fase 2 — Migrar LLM a DeepSeek (estilo Yeppo)
+### Fase 2 — Migrar LLM a DeepSeek Flash (estilo Yeppo) ⬅️ SIGUIENTE
 - Reemplazar `CLAUDE_API_KEY`/`claude-sonnet-4-6` por `DEEPSEEK_API_KEY`/`deepseek-chat` en `src/server.js`
-- Usar el patrón de `projects/softify-whatsapp-webhook/core/ai.js`:
-  - DeepSeek primario (más barato, ~10x)
-  - Timeout 10-15s, fallback a heurística local si falla
-  - **Sin fallback a Claude** (regla permanente)
-- Modelo: `deepseek-chat` (alias V4-Flash, probado OK 03-May-2026)
+- Usar el patrón de `projects/softify-whatsapp-webhook/core/ai.js`: DeepSeek primario, timeout 10-15s, fallback a heurística local si falla, **sin fallback a Claude** (regla permanente)
+- Modelo: `deepseek-chat` (DeepSeek Flash)
 - Prompt del bot boda: contexto (fecha, hora por confirmar, lugar Meihua, boda China/Coreana, dress code semi formal)
 
 ### Fase 3 — Slack bidireccional
