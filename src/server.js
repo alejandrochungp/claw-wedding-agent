@@ -1,5 +1,5 @@
 // claw-wedding-agent — WhatsApp Wedding Planner Bot
-// v1.6.0 — Claude RSVP + auto-replies (claude-sonnet-4-6) + Mateo Slack App
+// v1.6.1 — DeepSeek Flash RSVP + auto-replies + Mateo Slack App
 // Repo canónico: softifycl/claw-wedding-agent
 // Mirror (Railway): alejandrochungp/claw-wedding-agent
 
@@ -22,8 +22,8 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
 const WEDDING_SITE_URL = process.env.WEDDING_SITE_URL || 'https://boda.alejandro-y-kuilen.cl';
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
-const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 
 const META_API = 'https://graph.facebook.com/v22.0';
 const SLACK_API = 'https://slack.com/api';
@@ -89,7 +89,7 @@ app.get('/status', async (_req, res) => {
     phoneNumberId: PHONE_NUMBER_ID ? '***configured***' : 'missing',
     metaApp: META_APP_ID ? `${META_APP_ID.slice(0, 8)}...` : 'missing',
     slackEvents: !!SLACK_SIGNING_SECRET,
-    llmRSVP: !!CLAUDE_API_KEY,
+    llmRSVP: !!DEEPSEEK_API_KEY,
   });
 });
 
@@ -295,35 +295,36 @@ async function handleIncomingMessage(msg, fromPhone) {
   } catch (e) { /* ignore */ }
 }
 
-// ── Claude-based RSVP Classification ─────────────────────────
-// Uses claude-sonnet-4-6 (same model as Yeppo chatbot)
-// Falls back to negation-aware heuristic if CLAUDE_API_KEY not set
+// ── DeepSeek-based RSVP Classification ───────────────────────
+// Uses DeepSeek Flash (deepseek-chat) — regla permanente: sin Anthropic
+// Falls back to negation-aware heuristic if DEEPSEEK_API_KEY not set
 
 async function classifyRSVPIntent(text) {
-  if (!CLAUDE_API_KEY) {
+  if (!DEEPSEEK_API_KEY) {
     return heuristicRSVP(text);
   }
 
   try {
-    const res = await axios.post('https://api.anthropic.com/v1/messages', {
-      model: CLAUDE_MODEL,
+    const res = await axios.post('https://api.deepseek.com/v1/chat/completions', {
+      model: DEEPSEEK_MODEL,
       max_tokens: 5,
-      system: 'Clasificá el mensaje como "confirm" (SÍ asiste), "decline" (NO asiste), o "unknown" (no está claro).\n\n⚠️ "no voy" = decline. "no voy a poder" = decline. "no puedo confirmar todavía" = unknown. "sí, voy" = confirm. "dale, ahí estaré" = confirm.\n\nRespondé SOLO una palabra: confirm, decline, o unknown.',
-      messages: [{ role: 'user', content: text }]
+      messages: [
+        { role: 'system', content: 'Clasificá el mensaje como "confirm" (SÍ asiste), "decline" (NO asiste), o "unknown" (no está claro).\n\n⚠️ "no voy" = decline. "no voy a poder" = decline. "no puedo confirmar todavía" = unknown. "sí, voy" = confirm. "dale, ahí estaré" = confirm.\n\nRespondé SOLO una palabra: confirm, decline, o unknown.' },
+        { role: 'user', content: text }
+      ]
     }, {
       headers: {
-        'x-api-key': CLAUDE_API_KEY,
-        'anthropic-version': '2023-06-01',
+        'Authorization': 'Bearer ' + DEEPSEEK_API_KEY,
         'Content-Type': 'application/json',
       },
       timeout: 10000
     });
 
-    const classification = (res.data?.content?.[0]?.text || '').trim().toLowerCase();
-    console.log(`🤖 Claude RSVP: "${text.slice(0, 80)}" → ${classification}`);
+    const classification = (res.data?.choices?.[0]?.message?.content || '').trim().toLowerCase();
+    console.log(`🤖 DeepSeek RSVP: "${text.slice(0, 80)}" → ${classification}`);
     return classification || 'unknown';
   } catch (err) {
-    console.error('❌ Claude RSVP error:', err.message);
+    console.error('❌ DeepSeek RSVP error:', err.message);
     return heuristicRSVP(text);
   }
 }
@@ -360,21 +361,22 @@ async function handleTextRSVP(from, text) {
   } else {
     // Unknown intent — use Claude to generate a natural reply
     console.log(`🤷 RSVP unknown: ${from} — "${text.slice(0, 80)}"`);
-    await generateAndSendClaudeReply(from, text);
+    await generateAndSendDeepSeekReply(from, text);
   }
 }
 
-// ── Claude-Generated Auto-Reply ────────────────────────────
+// ── DeepSeek-Generated Auto-Reply ────────────────────────────
 // Generates a natural conversational reply for non-RSVP messages
 
-async function generateAndSendClaudeReply(phone, userText) {
-  if (!CLAUDE_API_KEY) return;
+async function generateAndSendDeepSeekReply(phone, userText) {
+  if (!DEEPSEEK_API_KEY) return;
 
   try {
-    const res = await axios.post('https://api.anthropic.com/v1/messages', {
-      model: CLAUDE_MODEL,
+    const res = await axios.post('https://api.deepseek.com/v1/chat/completions', {
+      model: DEEPSEEK_MODEL,
       max_tokens: 300,
-      system: `Sos el asistente de WhatsApp para la boda de ${TENANT.novios.nombre1} y ${TENANT.novios.nombre2}.
+      messages: [
+        { role: 'system', content: `Sos el asistente de WhatsApp para la boda de ${TENANT.novios.nombre1} y ${TENANT.novios.nombre2}.
 
 Contexto de la boda:
 - Fecha: ${new Date(TENANT.fecha).toLocaleDateString('es-CL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
@@ -388,25 +390,25 @@ Reglas:
 3. Si preguntan fecha/hora/lugar/ubicación → responde con los datos concretos. Incluí el link del calendario: ${TENANT.calendarUrl}
 4. Si NO es pregunta sobre la boda → redirigí amablemente: "Para confirmar tu asistencia usá los botones de arriba, o decime 'voy' o 'no voy a poder'"
 5. Máximo 3 oraciones. Breve y útil.
-6. Respuestas de UNA SOLA LÍNEA cuando sea posible.`,
-      messages: [{ role: 'user', content: userText }]
+6. Respuestas de UNA SOLA LÍNEA cuando sea posible.` },
+        { role: 'user', content: userText }
+      ]
     }, {
       headers: {
-        'x-api-key': CLAUDE_API_KEY,
-        'anthropic-version': '2023-06-01',
+        'Authorization': 'Bearer ' + DEEPSEEK_API_KEY,
         'Content-Type': 'application/json',
       },
       timeout: 15000
     });
 
-    const reply = (res.data?.content?.[0]?.text || '').trim();
+    const reply = (res.data?.choices?.[0]?.message?.content || '').trim();
     if (reply) {
       await sendWhatsAppMessage(phone, reply);
-      await notifySlack(`💬 *Claude reply* a \`${phone}\`: "${userText.slice(0, 80)}" → "${reply.slice(0, 100)}"`);
-      console.log(`💬 Claude reply sent to ${phone}`);
+      await notifySlack(`💬 *DeepSeek reply* a \`${phone}\`: "${userText.slice(0, 80)}" → "${reply.slice(0, 100)}"`);
+      console.log(`💬 DeepSeek reply sent to ${phone}`);
     }
   } catch (err) {
-    console.error('❌ Claude reply error:', err.message);
+    console.error('❌ DeepSeek reply error:', err.message);
     // Silent fail — don't spam guest with errors
   }
 }
@@ -806,7 +808,7 @@ async function start() {
     console.log(`   WhatsApp:        ${WHATSAPP_TOKEN ? '✅ configured' : '❌ missing'}`);
     console.log(`   Slack:           ${SLACK_BOT_TOKEN && SLACK_CHANNEL_ID ? '✅ configured' : '❌ missing'}`);
     console.log(`   Slack Events:    ${SLACK_SIGNING_SECRET ? '✅ configured' : '⚠️ not configured (needed for Slack→WA)'}`);
-    console.log(`   Claude LLM:     ${CLAUDE_API_KEY ? `✅ ${CLAUDE_MODEL}` : '⚠️ heuristic fallback'}`);
+    console.log(`   DeepSeek LLM:   ${DEEPSEEK_API_KEY ? `✅ ${DEEPSEEK_MODEL}` : '⚠️ heuristic fallback'}`);
     console.log(`   Redis:           ${redis.status === 'ready' ? '✅ connected' : '❌ not connected'}`);
     console.log(`   Simulator:       http://localhost:${PORT}/admin/simulate-webhook`);
   });
