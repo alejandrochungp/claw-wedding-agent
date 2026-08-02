@@ -257,6 +257,11 @@ async function handleIncomingMessage(msg, fromPhone) {
       interactiveId = interactive.list_reply.id;
       text = interactive.list_reply.title;
     }
+  } else if (msgType === 'button') {
+    // Quick reply de template llega como type=button (no interactive)
+    interactiveType = 'button';
+    interactiveId = (msg.button && (msg.button.payload || msg.button.text)) || '';
+    text = (msg.button && msg.button.text) || '';
   } else if (msgType === 'image') {
     text = '[Imagen recibida]';
   } else {
