@@ -183,12 +183,59 @@ app.post('/slack/events', async (req, res) => {
 });
 
 // ── Slack Message Handler (Slack → WhatsApp) ─────���───────────
+async function resolvePhoneFromThread(thread_ts, channel) {
+  // 1. Buscar en el mapa phoneToThread (Redis) por thread_ts
+  try {
+    const keys = await redis.hkeys(CONVERSATION_KEY);
+    for (const k of keys) {
+      if (k.startsWith('slack:thread:')) {
+        const raw = await redis.hget(CONVERSATION_KEY, k);
+        if (!raw) continue;
+        const data = JSON.parse(raw);
+        if (data.thread_ts === thread_ts) return k.replace('slack:thread:', '');
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  // 2. Fallback: leer el header del thread (primer mensaje) y extraer el teléfono
+  try {
+    const res = await axios.get(
+      `https://slack.com/api/conversations.replies?channel=${channel}&ts=${thread_ts}&limit=1`,
+      { headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` } }
+    );
+    const parentMsg = res.data?.messages?.[0];
+    const match = parentMsg?.text?.match(/\+?(569\d{8})/);
+    if (match) return match[1];
+  } catch (e) { /* ignore */ }
+
+  return null;
+}
+
 async function handleSlackMessage(event) {
-  const { user, text, ts, thread_ts } = event;
+  const { user, text, ts, thread_ts, channel } = event;
   console.log(`💬 Slack [${user}]: ${text.slice(0, 100)}`);
 
-  // Parse message format: +569XXXXXXXX mensaje
-  // Or: reply in thread (thread_ts) to send to phone from that thread
+  // Comando: tomar control (estilo Yeppo)
+  if (text.trim().toLowerCase() === 'tomar') {
+    const phone = await resolvePhoneFromThread(thread_ts, channel);
+    if (phone) {
+      await notifySlackReply(ts, `🎛️ Tomaste control de \`${phone}\`. Escribe tu respuesta en este thread y llegará al invitado. Escribe \`soltar\` para devolver al bot.`);
+    } else {
+      await notifySlackReply(ts, '⚠️ No pude identificar el teléfono de este hilo.');
+    }
+    return;
+  }
+
+  // Comando: soltar control
+  if (text.trim().toLowerCase() === 'soltar') {
+    const phone = await resolvePhoneFromThread(thread_ts, channel);
+    if (phone) {
+      await notifySlackReply(ts, `✅ Bot retoma la conversación de \`${phone}\`.`);
+    }
+    return;
+  }
+
+  // Formato alternativo: +569XXXXXXXX mensaje (sigue funcionando)
   const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
   let phone = null;
   let message = text;
@@ -197,23 +244,17 @@ async function handleSlackMessage(event) {
     phone = normalizePhone(phoneMatch[0]);
     message = text.replace(phoneMatch[0], '').trim();
   } else if (thread_ts) {
-    // In thread: get the phone from the parent message's Redis mapping
-    try {
-      phone = await redis.hget(CONVERSATION_KEY, `slack:${thread_ts}`);
-    } catch (e) { /* ignore */ }
-    if (!phone) {
-      await notifySlackReply(ts, '⚠️ No encontré un número de teléfono asociado a este hilo. Escribí el mensaje con el número: `+569XXXXXXXX tu mensaje`');
-      return;
-    }
+    // En thread: resolver el teléfono desde el header (estilo Yeppo)
+    phone = await resolvePhoneFromThread(thread_ts, channel);
   }
 
   if (!phone) {
-    await notifySlackReply(ts, '⚠️ Necesito un número de teléfono. Escribí: `+569XXXXXXXX tu mensaje`');
+    await notifySlackReply(ts, '⚠️ No encontré el teléfono. Respondé en el thread del invitado, o escribí: `+569XXXXXXXX tu mensaje`');
     return;
   }
 
   if (!message) {
-    await notifySlackReply(ts, '⚠️ El mensaje está vacío después del número. Escribí: `+569XXXXXXXX tu mensaje`');
+    await notifySlackReply(ts, '⚠️ El mensaje está vacío. Escribí tu respuesta en este thread.');
     return;
   }
 
@@ -221,12 +262,6 @@ async function handleSlackMessage(event) {
   const result = await sendWhatsAppMessage(phone, message);
 
   if (result) {
-    // Store the mapping: slack thread → phone
-    try {
-      await redis.hset(CONVERSATION_KEY, `slack:${ts}`, phone);
-      await redis.expire(CONVERSATION_KEY, 86400 * 30); // 30 day TTL
-    } catch (e) { /* ignore */ }
-
     const preview = message.length > 50 ? message.slice(0, 50) + '...' : message;
     await notifySlackReply(ts, `📤 Enviado a \`${phone}\`: ${preview}`);
   } else {
@@ -505,33 +540,82 @@ async function notifySlackReply(threadTs, text) {
   }
 }
 
+async function getOrCreateSlackThread(phone) {
+  // Retorna { thread_ts, headerTs } creando el thread si no existe (estilo Yeppo)
+  const existing = await redis.hget(CONVERSATION_KEY, `slack:thread:${phone}`);
+  if (existing) {
+    try {
+      const data = JSON.parse(existing);
+      // Thread expirado (>24h)
+      if (Date.now() - (data.timestamp || 0) < 24 * 60 * 60 * 1000) {
+        return data;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // Crear header del thread con el teléfono visible
+  const headerBase = `📱 *+${phone}*`;
+  const headerText = `🟡 ${headerBase}\n*Estado:* En curso — bot respondiendo\n\nComandos: \`tomar\` · \`soltar\``;
+  const res = await axios.post(`${SLACK_API}/chat.postMessage`, {
+    channel: SLACK_CHANNEL_ID,
+    text: headerText,
+    mrkdwn: true,
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: headerText } }],
+  }, {
+    headers: {
+      Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (res.data?.ts) {
+    const data = { thread_ts: res.data.ts, headerTs: res.data.ts, headerBase, channel: SLACK_CHANNEL_ID, timestamp: Date.now() };
+    await redis.hset(CONVERSATION_KEY, `slack:thread:${phone}`, JSON.stringify(data));
+    await redis.expire(CONVERSATION_KEY, 86400 * 30);
+    return data;
+  }
+  return null;
+}
+
 async function sendToSlack(from, text, timestamp, fromPhone, buttonId, wamid) {
   if (!SLACK_BOT_TOKEN || !SLACK_CHANNEL_ID) return;
   try {
     const msgTime = new Date(parseInt(timestamp) * 1000).toISOString();
-    let slackMsg = `💍 *Mensaje de boda*\n> *De:* \`${from}\`\n> *Hora:* ${msgTime}\n> *Cuenta:* ${fromPhone || 'desconocida'}`;
+    let slackMsg = `💬 *Invitado:* ${text}`;
     if (buttonId) slackMsg += `\n> *Botón:* \`${buttonId}\``;
-    slackMsg += `\n\n${text}\n\n> Responde desde Slack: \`${from} tu mensaje\``;
+    slackMsg += `\n> *Hora:* ${msgTime}`;
 
-    const slackRes = await axios.post(`${SLACK_API}/chat.postMessage`, {
-      channel: SLACK_CHANNEL_ID,
-      text: slackMsg,
-      mrkdwn: true,
-    }, {
-      headers: {
-        Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    // Thread estilo Yeppo: header + reply
+    const thread = await getOrCreateSlackThread(from);
+    if (thread?.thread_ts) {
+      await axios.post(`${SLACK_API}/chat.postMessage`, {
+        channel: SLACK_CHANNEL_ID,
+        thread_ts: thread.thread_ts,
+        text: slackMsg,
+        mrkdwn: true,
+      }, {
+        headers: {
+          Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    } else {
+      // Fallback: mensaje suelto (si no hay thread)
+      await axios.post(`${SLACK_API}/chat.postMessage`, {
+        channel: SLACK_CHANNEL_ID,
+        text: `${slackMsg}\n\n> ${from}`,
+        mrkdwn: true,
+      }, {
+        headers: {
+          Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
 
-    // Store Slack message TS for threading
-    if (wamid && slackRes.data?.ts) {
+    if (wamid) {
       try {
-        await redis.hset(SLACK_TS_KEY, wamid, slackRes.data.ts);
-        await redis.hset(SLACK_TS_KEY, `slack_ts:${slackRes.data.ts}`, from);
-        // Map Slack thread to phone for easy replies
-        await redis.hset(CONVERSATION_KEY, `slack:${slackRes.data.ts}`, from);
-        await redis.expire(CONVERSATION_KEY, 86400 * 30);
+        await redis.hset(SLACK_TS_KEY, wamid, thread?.thread_ts || '');
         await redis.expire(SLACK_TS_KEY, 86400 * 30);
       } catch (e) { /* ignore */ }
     }

@@ -1,0 +1,39 @@
+# Manifesto Slack App — Wedding Planner (NoNosCasamos)
+# Creado: 02-Ago-2026
+# Uso: api.slack.com/apps → Create New App → From an app manifest → pegar este YAML
+# Objetivo: replicar el mecanismo de threads de Yeppo/Softify (core/slack.js)
+# Request URL de eventos: https://claw-wedding-agent-production.up.railway.app/slack/events
+
+display_information:
+  name: Wedding Planner
+  description: Bot de WhatsApp para bodas — RSVP, recordatorios y respuestas desde Slack
+  background_color: "#7d3c98"
+  long_description: "Asistente de WhatsApp para la boda de Alejandro y Kuilen. Recibe confirmaciones de asistencia (RSVP), notifica en Slack y permite responder a los invitados desde un thread en Slack."
+
+features:
+  bot_user:
+    display_name: Wedding Planner
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write            # postear/actualizar mensajes y threads en Slack
+      - channels:history      # leer historial de canales públicos
+      - groups:history        # leer historial de canales privados (#wedding-planner)
+      - channels:read         # listar/ver canales públicos
+      - groups:read           # listar/ver canales privados
+      - users:read            # obtener nombre del operador (sendOperatorReply)
+      - app_mentions:read     # recibir menciones del bot
+
+settings:
+  event_subscriptions:
+    request_url: https://claw-wedding-agent-production.up.railway.app/slack/events
+    bot_events:
+      - message.channels      # mensajes en canales públicos
+      - message.groups        # mensajes en canales privados (#wedding-planner es privado)
+      - app_mention           # menciones al bot
+
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
