@@ -131,11 +131,22 @@ El cPanel de Bluehost (cuenta `tupiboxc`, sh00634) **no expone creación de addo
 - `uapi DomainTemplates` → módulo no instalado
 - Solo existe `SubDomain::addsubdomain` (crea subdominios de dominios ya existentes)
 
-**Opciones:** (A) Alejandro crea el addon domain en cPanel UI (Domains → Create A New Domain, ~2 min), (B) dar acceso cPanel (password/API token) a Claw, (C) verificar si hay otra vía (whmapi necesita root).
+### ✅ Addon domain creado vía portal UI (02-Ago)
+- Domains → Add a Domain → **Connect an external domain** → `noscasamos.vip` → aparece en "My Domain Names (8)"
+- Login portal: User ID `TUPIBOXC` + password nueva (`.secrets/bluehost_portal.json`, reseteada vía Forgot Password + 2FA por correo)
+
+### ✅ RESUELTO 03-Ago: addon domain + subdominio creados en cPanel vía SSO
+- **SSO portal→cPanel**: portal → Hosting (WordPress Plus, TUPIBOX.COM) → botón **"cPanel"** → acceso SSO directo como `tupiboxc` sin password
+- **Addon domain en cPanel**: Domains → Create A New Domain → `noscasamos.vip` → `/home2/tupiboxc/noscasamos.vip` → SUCCESS
+- **Subdominio boda**: `uapi SubDomain addsubdomain domain=alejandro-kuilen rootdomain=noscasamos.vip dir=/home2/tupiboxc/alejandro-kuilen.noscasamos.vip` → status 1 ✅
+- **Trucos encontrados**: (1) pasar el label corto como `domain` (si pasas el dominio completo, cPanel duplica el nombre); (2) si un A record del portal ya existe en la zona, uapi/UI fallan con "DNS entry already exists" → borrar el A record primero (Zone Editor UI: `zone_editor/index.html`) y luego crear el subdominio
+- **Diagnóstico completo (con resolución):** `docs/DIAGNOSTICO-SUBDOMINIO-BLUEHOST-2026-08-03.md`
 
 ### Pendientes
-- [ ] Crear addon domain `noscasamos.vip` en cPanel Bluehost
-- [ ] Crear subdominio por boda (`alejandro-kuilen.noscasamos.vip`) vía `uapi SubDomain addsubdomain` (disponible ✅)
+- [x] Crear addon domain `noscasamos.vip` en cPanel Bluehost (03-Ago ✅ vía SSO)
+- [x] Crear subdominio por boda (`alejandro-kuilen.noscasamos.vip`) vía `uapi SubDomain addsubdomain` (03-Ago ✅)
+- [x] Registros A en zona DNS (root + subdominio → 50.6.18.31) ✅
+- [ ] ⏳ Propagación DNS pública (24-48h según Bluehost)
 - [ ] Subir sitio producto + micrositio boda (estructura sección 3)
 - [ ] Crear templates nuevos con botones URL → páginas de confirmación/no confirmación en noscasamos.vip
 - [ ] Verificar suscripción de la app nueva `1590375222487560` al WABA
