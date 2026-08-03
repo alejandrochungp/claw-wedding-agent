@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Contacto — No Nos Casamos</title>
+<title>Contacto — Nos Casamos</title>
 <meta name="description" content="Cuéntanos de tu boda y armamos tu bot de WhatsApp. Respondemos el mismo día.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
@@ -12,7 +12,7 @@
 <body>
 <header class="site-header">
   <div class="container header-inner">
-    <a class="brand" href="index.html">No Nos Casamos<span class="brand-dot">.</span></a>
+    <a class="brand" href="index.html">Nos Casamos<span class="brand-dot">.</span></a>
     <nav class="main-nav">
       <a href="index.html">Inicio</a>
       <a href="como-funciona.html">Cómo funciona</a>
@@ -42,18 +42,18 @@
           <p>Operamos en todo Chile. Reuniones de setup por videollamada — no necesitas mojarte.</p>
         </div>
 
-        <form class="contact-form" action="https://wa.me/56994635497" method="get" target="_blank">
+        <form class="contact-form" id="contact-form">
           <label for="name">Tus nombres (novio/novia)</label>
-          <input type="text" id="name" name="text" placeholder="Alejandro y Kuilen" required>
+          <input type="text" id="name" placeholder="Alejandro y Kuilen" required>
 
           <label for="fecha">Fecha de la boda</label>
-          <input type="text" id="fecha" name="text" placeholder="17 Nov 2026" required>
+          <input type="text" id="fecha" placeholder="17 Nov 2026" required>
 
           <label for="ciudad">Ciudad / Región</label>
-          <input type="text" id="ciudad" name="text" placeholder="Santiago">
+          <input type="text" id="ciudad" placeholder="Santiago">
 
           <label for="invitados">N° estimado de invitados</label>
-          <select id="invitados" name="text">
+          <select id="invitados">
             <option>Menos de 50</option>
             <option selected>50 - 150</option>
             <option>150 - 300</option>
@@ -61,7 +61,7 @@
           </select>
 
           <label for="plan">Plan de interés</label>
-          <select id="plan" name="text">
+          <select id="plan">
             <option>Esencial ($49.990 setup)</option>
             <option selected>Completo ($79.990 setup)</option>
             <option>Premium ($119.990 setup)</option>
@@ -69,11 +69,31 @@
           </select>
 
           <label for="msg">Cuéntanos más (opcional)</label>
-          <textarea id="msg" name="text" rows="3" placeholder="Dress code, ceremonia + recepción, datos especiales..."></textarea>
+          <textarea id="msg" rows="3" placeholder="Dress code, ceremonia + recepción, datos especiales..."></textarea>
 
           <button class="btn btn-primary" type="submit" style="border:none; cursor:pointer;">Enviar por WhatsApp →</button>
           <p style="font-size:.78rem; opacity:.6; text-align:center;">Se abre WhatsApp con tu consulta lista para enviar.</p>
         </form>
+        <script>
+        document.getElementById('contact-form').addEventListener('submit', function (e) {
+          e.preventDefault();
+          var name = document.getElementById('name').value.trim();
+          var fecha = document.getElementById('fecha').value.trim();
+          var ciudad = document.getElementById('ciudad').value.trim();
+          var invitados = document.getElementById('invitados').value;
+          var plan = document.getElementById('plan').value;
+          var msg = document.getElementById('msg').value.trim();
+          if (!name || !fecha) { alert('Completa tus nombres y la fecha de la boda.'); return; }
+          var texto = 'Hola! Quiero información de Nos Casamos para mi boda:\n\n'
+            + '👤 ' + name + '\n'
+            + '📅 ' + fecha + '\n'
+            + '📍 ' + (ciudad || '-') + '\n'
+            + '👥 Invitados: ' + invitados + '\n'
+            + '📋 Plan: ' + plan + '\n'
+            + (msg ? '💬 ' + msg : '');
+          window.open('https://wa.me/56994635497?text=' + encodeURIComponent(texto), '_blank');
+        });
+        </script>
       </div>
     </div>
   </section>
@@ -82,7 +102,7 @@
 <footer class="footer">
   <div class="container footer-inner">
     <div>
-      <p class="footer-brand">No Nos Casamos<span class="brand-dot">.</span></p>
+      <p class="footer-brand">Nos Casamos<span class="brand-dot">.</span></p>
       <p>WhatsApp automático para bodas en Chile.</p>
     </div>
     <div class="footer-links">
@@ -92,7 +112,7 @@
       <a href="contacto.html">Contacto</a>
     </div>
   </div>
-  <p class="footer-copy">© 2026 No Nos Casamos · Hecho con 💌 para parejas chilenas</p>
+  <p class="footer-copy">© 2026 Nos Casamos · Hecho con 💌 para parejas chilenas</p>
 </footer>
 
 <a class="wa-float" href="https://wa.me/56994635497?text=Hola!%20Quiero%20saber%20m%C3%A1s%20de%20No%20Nos%20Casamos%20para%20mi%20boda" target="_blank" aria-label="WhatsApp">💬</a>
