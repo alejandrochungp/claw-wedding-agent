@@ -3,6 +3,19 @@
 > Sitio estático personalizado para cada boda, hosteable en GitHub Pages o Railway Static.
 > URL sugerida: `boda.nombrenovios.cl` o subdominio de `wedding-planner.cl`
 
+## 🌐 Dominios y deploy (Bluehost) — ACTUALIZADO 03-Ago-2026
+
+**El sitio se sirve en DOS dominios** (mismo contenido, docroots espejados):
+
+| Dominio | Docroot en servidor (50.6.18.31) | Uso |
+|---------|----------------------------------|-----|
+| `noscasamos.vip` (raíz addon) | `/home2/tupiboxc/noscasamos.vip` | Dominio principal del producto |
+| `alejandro-kuilen.noscasamos.vip` (subdominio) | `/home2/tupiboxc/alejandro-kuilen.noscasamos.vip` | URL corta para invitados (templates WhatsApp) |
+
+**⚠️ Lección (03-Ago):** el docroot raíz quedó VACÍO tras crear el addon domain — el sitio solo vivía en el subdominio y `noscasamos.vip` daba 403. Fix: copiar el sitio a AMBOS docroots. El script `scripts/deploy_site.py` ahora publica en los dos (scp + verificación por Host header) y verifica encoding antes de subir.
+
+**Verificación:** DNS propagado (noscasamos.vip → 50.6.18.31 en resolvers públicos). HTTP y HTTPS responden 200 en todas las páginas y assets de ambos dominios. Los assets (fotos/videos) se suben con `site/assets/` completo (repo = fuente de verdad).
+
 ## 🏠 Páginas
 
 ### 1. Landing (`/` — index.html)

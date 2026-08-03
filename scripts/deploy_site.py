@@ -15,8 +15,14 @@ WS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))  # projects/
 SITE = os.path.join(WS, "site")
 KEY = os.path.join(os.path.dirname(os.path.dirname(WS)), ".secrets", "bluehost_tupibox_key")  # workspace/.secrets
 HOST = "tupiboxc@50.6.18.31"
-DOCROOT = "/home2/tupiboxc/alejandro-kuilen.noscasamos.vip"
-HOST_HEADER = "alejandro-kuilen.noscasamos.vip"
+# Ambos docroots deben recibir el mismo contenido:
+# - raíz noscasamos.vip (addon domain)
+# - subdominio alejandro-kuilen.noscasamos.vip
+DOCROOTS = [
+    "/home2/tupiboxc/noscasamos.vip",
+    "/home2/tupiboxc/alejandro-kuilen.noscasamos.vip",
+]
+HOST_HEADERS = ["noscasamos.vip", "alejandro-kuilen.noscasamos.vip"]
 
 def run(cmd):
     print(">", " ".join(cmd))
@@ -35,26 +41,29 @@ def main():
         print("ABORTADO: hay archivos con problemas de encoding. Corregir antes de subir.")
         return 1
 
-    # Paso 2: scp
-    print("\n=== [2/3] Subiendo al servidor ===")
+    # Paso 2: scp a AMBOS docroots (raíz + subdominio)
+    print("\n=== [2/3] Subiendo al servidor (2 docroots) ===")
     files = []
     for root, _dirs, fs in os.walk(SITE):
         for fn in sorted(fs):
             files.append(os.path.join(root, fn))
-    rc = run(["scp", "-i", KEY, "-o", "StrictHostKeyChecking=no"] + files + [f"{HOST}:{DOCROOT}/"])
-    if rc != 0:
-        print("ABORTADO: scp falló.")
-        return 1
+    for docroot in DOCROOTS:
+        rc = run(["scp", "-i", KEY, "-o", "StrictHostKeyChecking=no"] + files + [f"{HOST}:{docroot}/"])
+        if rc != 0:
+            print(f"ABORTADO: scp falló hacia {docroot}")
+            return 1
 
-    # Paso 3: verificación
+    # Paso 3: verificación en AMBOS hosts
     print("\n=== [3/3] Verificación en servidor ===")
-    for page in ["index.html", "info.html", "rsvp.html", "galeria.html", "regalos.html", "confirmado.html", "no-confirmado.html"]:
-        r = subprocess.run(["curl.exe", "-s", "-o", "NUL", "-w", "%{http_code}",
-                            "-H", f"Host: {HOST_HEADER}", f"http://50.6.18.31/{page}"],
-                           capture_output=True, text=True)
-        print(f"  {page}: {r.stdout.strip()}")
+    for host_header in HOST_HEADERS:
+        print(f"  --- Host: {host_header} ---")
+        for page in ["index.html", "info.html", "rsvp.html", "galeria.html", "regalos.html", "confirmado.html", "no-confirmado.html"]:
+            r = subprocess.run(["curl.exe", "-s", "-o", "NUL", "-w", "%{http_code}",
+                                "-H", f"Host: {host_header}", f"http://50.6.18.31/{page}"],
+                               capture_output=True, text=True)
+            print(f"  {page}: {r.stdout.strip()}")
 
-    print("\nDeploy completado. Recordar: DNS aún puede estar propagando (24-48h).")
+    print("\nDeploy completado (ambos docroots). DNS ya propagado a 50.6.18.31.")
     return 0
 
 if __name__ == "__main__":
