@@ -1,10 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
-<title>GalerÃ­a â€” Alejandro &amp; Kuilen</title>
+<title>Galería — Alejandro &amp; Kuilen</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
@@ -18,55 +18,86 @@
   .tl-item::before { content: ''; position: absolute; left: -27px; top: 6px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-primary); border: 2px solid var(--color-secondary); }
   .tl-date { font-family: var(--font-heading); color: var(--color-primary); font-weight: 600; }
   .tl-text { margin-top: 2px; }
+  .section-title { text-align: center; font-family: var(--font-heading); color: var(--color-primary); margin: 50px 0 8px; font-size: 1.7rem; }
+  .section-sub { text-align: center; opacity: 0.75; margin-bottom: 22px; }
+  .gallery-grid figure { margin: 0; }
+  .gallery-grid img { width: 100%; height: 260px; object-fit: cover; border-radius: 10px; transition: transform 0.25s; cursor: pointer; display: block; }
+  .gallery-grid img:hover { transform: scale(1.03); }
+  .gallery-grid figcaption { font-size: 0.85rem; opacity: 0.75; margin-top: 6px; text-align: center; }
 </style>
 </head>
 <body>
 <header class="page-header">
   <h1>Nuestra historia</h1>
-  <p>Los hitos que nos trajeron hasta aquÃ­</p>
+  <p>Los hitos y viajes que nos trajeron hasta aquí</p>
 </header>
 
 <main class="container">
-  <!-- ðŸŽ¬ Video propuesta (se agrega cuando llegue de Alejandro) -->
+  <!-- 🎬 Video propuesta (se agrega cuando llegue de Alejandro) -->
   <div class="video-box" id="video-propuesta">
-    <div class="video-placeholder">ðŸŽ¬</div>
+    <div class="video-placeholder">🎬</div>
     <p><strong>Video de la propuesta</strong></p>
-    <p>PrÃ³ximamente...</p>
+    <p>Próximamente...</p>
   </div>
 
-  <h2 style="text-align:center; font-family:var(--font-heading); color:var(--color-primary); margin-top:44px;">Nuestros hitos</h2>
+  <h2 class="section-title">Nuestros hitos</h2>
   <div class="timeline">
     <div class="tl-item">
-      <div class="tl-date">ðŸ—“ Hito 1</div>
-      <div class="tl-text">Nos conocimos â€” <em>(fecha por confirmar)</em></div>
+      <div class="tl-date">🗓 Hito 1</div>
+      <div class="tl-text">Nos conocimos — <em>(fecha por confirmar)</em></div>
     </div>
     <div class="tl-item">
-      <div class="tl-date">ðŸ—“ Hito 2</div>
-      <div class="tl-text">Primer viaje juntos â€” <em>(por confirmar)</em></div>
+      <div class="tl-date">🗓 Hito 2</div>
+      <div class="tl-text">Primer viaje juntos — <em>(por confirmar)</em></div>
     </div>
     <div class="tl-item">
-      <div class="tl-date">ðŸ—“ Hito 3</div>
-      <div class="tl-text">La propuesta ðŸ’ â€” <em>(por confirmar)</em></div>
+      <div class="tl-date">🗓 Hito 3</div>
+      <div class="tl-text">La propuesta 💍 — <em>(por confirmar)</em></div>
     </div>
     <div class="tl-item">
       <div class="tl-date">17 Nov 2026</div>
-      <div class="tl-text">Â¡Nos casamos! ðŸŽ‰</div>
+      <div class="tl-text">¡Nos casamos! 🎉</div>
     </div>
   </div>
 
+  <h2 class="section-title">Machu Picchu 🇵🇪</h2>
+  <p class="section-sub">Nuestro último viaje — la ciudadela entre las nubes</p>
   <div class="gallery-grid">
-    <img src="assets/foto-pareja.jpg" alt="Alejandro y Kuilen" onclick="this.requestFullscreen()">
+    <figure>
+      <img src="assets/machupicchu/machupicchu-1.jpg" alt="Abrazando el paisaje de Machu Picchu" onclick="this.requestFullscreen()">
+      <figcaption>Abrazando la ciudadela</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/machupicchu/machupicchu-2.jpg" alt="Con una llama en Machu Picchu" onclick="this.requestFullscreen()">
+      <figcaption>Nueva amiga 🦙</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/machupicchu/machupicchu-3.jpg" alt="En la cima neblinosa" onclick="this.requestFullscreen()">
+      <figcaption>Cima entre nubes</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/machupicchu/machupicchu-4.jpg" alt="Laguna turquesa" onclick="this.requestFullscreen()">
+      <figcaption>Laguna turquesa</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/machupicchu/machupicchu-5.jpg" alt="Abrazo frente a la laguna" onclick="this.requestFullscreen()">
+      <figcaption>Momento de calma</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/machupicchu/machupicchu-6.jpg" alt="Escaleras de piedra con arco" onclick="this.requestFullscreen()">
+      <figcaption>Explorando ruinas</figcaption>
+    </figure>
   </div>
 
   <div style="text-align:center; margin: 40px 0;">
-    <a class="btn btn-ghost" href="index.html" style="border-color:var(--color-primary); color:var(--color-primary);">â† Volver</a>
+    <a class="btn btn-ghost" href="index.html" style="border-color:var(--color-primary); color:var(--color-primary);">← Volver</a>
   </div>
 </main>
 
 <footer class="footer">
-  <p>Alejandro &amp; Kuilen â€” 17 Nov 2026</p>
+  <p>Alejandro &amp; Kuilen — 17 Nov 2026</p>
 </footer>
 
-<a class="wa-float" href="https://wa.me/56994635497" target="_blank" aria-label="WhatsApp">ðŸ’¬</a>
+<a class="wa-float" href="https://wa.me/56994635497" target="_blank" aria-label="WhatsApp">💬</a>
 </body>
 </html>
