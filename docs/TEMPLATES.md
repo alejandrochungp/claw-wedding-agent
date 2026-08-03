@@ -113,6 +113,99 @@ Los detalles te llegan después con la invitación formal. Por ahora solo dime s
 
 ---
 
+## Template 1d: `save_the_date_v4_img` ✅ (URL BUTTONS + IMAGE HEADER) — 03-Ago
+
+**Meta ID:** `1585195933335096`
+**Status:** PENDING (creado 03-Ago-2026 16:55)
+**Categoría:** MARKETING | **Idioma:** es
+
+> Recreación de `save_the_date_v4` con **header IMAGE** (foto pareja vía Resumable Upload API, mismo flujo que v3).
+> ⚠️ El nombre original `save_the_date_v4` (texto) se ELIMINÓ y Meta no permitió reusarlo de inmediato (cooldown) → se usa sufijo `_img`.
+
+### Header (IMAGE)
+Foto pareja: `projects/boda-china-2026/foto-pareja-save-the-date.jpg` (handle resumable upload)
+
+### Body
+```
+Nos casamos el {{1}} de {{2}} de {{3}}. Reserva la fecha y confirma tu asistencia tocando un boton:
+```
+
+### Variables (3)
+| Var | Ejemplo |
+|-----|---------|
+| {{1}} | 17 |
+| {{2}} | noviembre |
+| {{3}} | 2026 |
+
+### Botones (URL)
+| Tipo | Texto | URL |
+|------|-------|-----|
+| URL | Confirmar asistencia | https://alejandro-kuilen.noscasamos.vip/rsvp.html |
+| URL | No podre asistir | https://alejandro-kuilen.noscasamos.vip/no-confirmado.html |
+
+---
+
+## Template 9: `boda_info_img` (URL BUTTONS + IMAGE HEADER) — 03-Ago
+
+**Meta ID:** `2386197625122304` | **Status:** PENDING | **Categoría:** UTILITY | **Idioma:** es
+
+### Header (IMAGE)
+Foto pareja (mismo handle que v4_img)
+
+### Body
+```
+Hola {{1}}, aqui tienes la info de la boda de {{2}} & {{3}}:
+
+Lugar: {{4}}
+Dress code: {{5}}
+Estacionamiento: {{6}}
+
+Todo el detalle en nuestro sitio:
+```
+
+### Variables (6)
+| Var | Ejemplo |
+|-----|---------|
+| {{1}} | Tia Maria |
+| {{2}} | Alejandro |
+| {{3}} | Kuilen |
+| {{4}} | Restaurante Meihua, Cerrillos |
+| {{5}} | Formal |
+| {{6}} | Muy reducido, llegar en Uber |
+
+### Botones (URL)
+| Tipo | Texto | URL |
+|------|-------|-----|
+| URL | Info del evento | https://alejandro-kuilen.noscasamos.vip/info.html |
+| URL | Mesa de regalos | https://alejandro-kuilen.noscasamos.vip/regalos.html |
+
+---
+
+## Template 10: `boda_galeria_img` (URL BUTTON + IMAGE HEADER) — 03-Ago
+
+**Meta ID:** `1922211198453227` | **Status:** PENDING | **Categoría:** MARKETING | **Idioma:** es
+
+### Header (IMAGE)
+Foto pareja (mismo handle)
+
+### Body
+```
+Mira nuestra historia: fotos, hitos y el video de la propuesta de {{1}} & {{2}} estan en nuestra galeria:
+```
+
+### Variables (2)
+| Var | Ejemplo |
+|-----|---------|
+| {{1}} | Alejandro |
+| {{2}} | Kuilen |
+
+### Botones (URL)
+| Tipo | Texto | URL |
+|------|-------|-----|
+| URL | Ver galeria | https://alejandro-kuilen.noscasamos.vip/galeria.html |
+
+---
+
 ## Template 1c: `save_the_date_v3` ✅ (ACTIVO — IMAGE HEADER)
 
 **Meta ID:** `1359786772191285`
