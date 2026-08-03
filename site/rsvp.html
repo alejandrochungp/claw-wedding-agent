@@ -1,10 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
-<title>Confirmar asistencia â€” Alejandro &amp; Kuilen</title>
+<title>Confirmar asistencia — Alejandro &amp; Kuilen</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
@@ -12,51 +12,51 @@
 <body>
 <header class="page-header">
   <h1>Confirmar asistencia</h1>
-  <p>Alejandro &amp; Kuilen Â· 17 Nov 2026 Â· Restaurante Meihua</p>
+  <p>Alejandro &amp; Kuilen · 17 Nov 2026 · Restaurante Meihua</p>
 </header>
 
 <main class="container narrow">
   <div class="rsvp-form" id="rsvp-form">
-    <p><strong>Â¿Vienes a nuestra boda?</strong> CuÃ©ntanos para tener todo listo ðŸ¥‚</p>
+    <p><strong>¿Vienes a nuestra boda?</strong> Cuéntanos para tener todo listo 🥂</p>
 
     <label for="name">Nombre completo</label>
     <input type="text" id="name" name="name" required placeholder="Tu nombre">
 
-    <label for="phone">TelÃ©fono (WhatsApp)</label>
+    <label for="phone">Teléfono (WhatsApp)</label>
     <input type="tel" id="phone" name="phone" placeholder="+56 9 ...">
 
-    <label>Â¿AsistirÃ¡s?</label>
+    <label>¿Asistirás?</label>
     <div class="rsvp-radio">
-      <label><input type="radio" name="attending" value="si" checked> SÃ­, allÃ¡ estarÃ© ðŸŽ‰</label>
-      <label><input type="radio" name="attending" value="no"> No podrÃ© ðŸ˜¢</label>
-      <label><input type="radio" name="attending" value="talvez"> Tal vez ðŸ¤”</label>
+      <label><input type="radio" name="attending" value="si" checked> Sí, allá estaré 🎉</label>
+      <label><input type="radio" name="attending" value="no"> No podré 😢</label>
+      <label><input type="radio" name="attending" value="talvez"> Tal vez 🤔</label>
     </div>
 
-    <label for="guests">NÂ° de acompaÃ±antes</label>
+    <label for="guests">N° de acompañantes</label>
     <input type="number" id="guests" name="guests" min="0" max="5" value="0">
 
     <label for="diet">Restricciones alimentarias</label>
     <textarea id="diet" name="diet" rows="2" placeholder="Alergias, vegetariano, etc. (opcional)"></textarea>
 
-    <label for="parking">Â¿Necesitas estacionamiento?</label>
+    <label for="parking">¿Necesitas estacionamiento?</label>
     <div class="rsvp-radio">
-      <label><input type="radio" name="parking" value="si"> SÃ­</label>
+      <label><input type="radio" name="parking" value="si"> Sí</label>
       <label><input type="radio" name="parking" value="no" checked> No</label>
     </div>
 
     <label for="message">Mensaje para los novios (opcional)</label>
     <textarea id="message" name="message" rows="2" placeholder="Algo lindo para ellos..."></textarea>
 
-    <button type="submit" class="btn btn-solid" id="submit-rsvp">Enviar confirmaciÃ³n</button>
+    <button type="submit" class="btn btn-solid" id="submit-rsvp">Enviar confirmación</button>
     <p id="rsvp-status" style="margin-top:14px; font-size:0.95rem;"></p>
   </div>
 </main>
 
 <footer class="footer">
-  <p>Alejandro &amp; Kuilen â€” 17 Nov 2026</p>
+  <p>Alejandro &amp; Kuilen — 17 Nov 2026</p>
 </footer>
 
-<a class="wa-float" href="https://wa.me/56994635497" target="_blank" aria-label="WhatsApp">ðŸ’¬</a>
+<a class="wa-float" href="https://wa.me/56994635497" target="_blank" aria-label="WhatsApp">💬</a>
 
 <script>
 document.getElementById('submit-rsvp').addEventListener('click', function () {
@@ -69,21 +69,21 @@ document.getElementById('submit-rsvp').addEventListener('click', function () {
   var message = document.getElementById('message').value.trim();
   var status = document.getElementById('rsvp-status');
 
-  if (!name) { status.textContent = 'âš ï¸ Escribe tu nombre'; status.style.color = '#8B3232'; return; }
+  if (!name) { status.textContent = '⚠️ Escribe tu nombre'; status.style.color = '#8B3232'; return; }
 
-  var asistencia = attending === 'si' ? 'SÃ ðŸŽ‰' : (attending === 'no' ? 'NO ðŸ˜¢' : 'TAL VEZ ðŸ¤”');
+  var asistencia = attending === 'si' ? 'SÍ 🎉' : (attending === 'no' ? 'NO 😢' : 'TAL VEZ 🤔');
   var texto = 'Hola! Confirmo mi asistencia a la boda:\n\n'
-    + 'ðŸ‘¤ ' + name + '\n'
-    + 'ðŸ“± ' + (phone || '-') + '\n'
-    + 'âœ… Asistencia: ' + asistencia + '\n'
-    + 'ðŸ‘¥ AcompaÃ±antes: ' + guests + '\n'
-    + 'ðŸ½ Restricciones: ' + (diet || '-') + '\n'
-    + 'ðŸ…¿ï¸ Estacionamiento: ' + (parking === 'si' ? 'SÃ­' : 'No') + '\n'
-    + (message ? 'ðŸ’Œ Mensaje: ' + message : '');
+    + '👤 ' + name + '\n'
+    + '📱 ' + (phone || '-') + '\n'
+    + '✅ Asistencia: ' + asistencia + '\n'
+    + '👥 Acompañantes: ' + guests + '\n'
+    + '🍽 Restricciones: ' + (diet || '-') + '\n'
+    + '🅿️ Estacionamiento: ' + (parking === 'si' ? 'Sí' : 'No') + '\n'
+    + (message ? '💌 Mensaje: ' + message : '');
 
-  // Enviar vÃ­a WhatsApp (el bot procesa el RSVP y confirma)
+  // Enviar vía WhatsApp (el bot procesa el RSVP y confirma)
   window.open('https://wa.me/56994635497?text=' + encodeURIComponent(texto), '_blank');
-  status.textContent = 'âœ… Â¡Gracias! Te redirigimos a WhatsApp para confirmar. Si no se abriÃ³, escrÃ­benos directo.';
+  status.textContent = '✅ ¡Gracias! Te redirigimos a WhatsApp para confirmar. Si no se abrió, escríbenos directo.';
   status.style.color = '#2e7d32';
 });
 </script>
