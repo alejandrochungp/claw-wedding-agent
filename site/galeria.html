@@ -8,18 +8,56 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<style>
+  .video-box { background: #fff; border-radius: 14px; padding: 30px; text-align: center; box-shadow: 0 3px 14px rgba(60,36,21,0.08); margin: 36px 0 10px; }
+  .video-box .video-placeholder { font-size: 3.5rem; margin-bottom: 8px; }
+  .video-box p { opacity: 0.8; }
+  .timeline { position: relative; max-width: 620px; margin: 40px auto 0; padding-left: 30px; }
+  .timeline::before { content: ''; position: absolute; left: 8px; top: 4px; bottom: 4px; width: 2px; background: var(--color-secondary); }
+  .tl-item { position: relative; padding: 0 0 26px 22px; }
+  .tl-item::before { content: ''; position: absolute; left: -27px; top: 6px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-primary); border: 2px solid var(--color-secondary); }
+  .tl-date { font-family: var(--font-heading); color: var(--color-primary); font-weight: 600; }
+  .tl-text { margin-top: 2px; }
+</style>
 </head>
 <body>
 <header class="page-header">
-  <h1>Nuestra galería</h1>
-  <p>Un pedacito de nuestra historia</p>
+  <h1>Nuestra historia</h1>
+  <p>Los hitos que nos trajeron hasta aquí</p>
 </header>
 
 <main class="container">
-  <p style="text-align:center; margin-bottom:10px;">Pronto subiremos más fotos de la sesión pre-boda y del gran día 📸</p>
+  <!-- 🎬 Video propuesta (se agrega cuando llegue de Alejandro) -->
+  <div class="video-box" id="video-propuesta">
+    <div class="video-placeholder">🎬</div>
+    <p><strong>Video de la propuesta</strong></p>
+    <p>Próximamente...</p>
+  </div>
+
+  <h2 style="text-align:center; font-family:var(--font-heading); color:var(--color-primary); margin-top:44px;">Nuestros hitos</h2>
+  <div class="timeline">
+    <div class="tl-item">
+      <div class="tl-date">🗓 Hito 1</div>
+      <div class="tl-text">Nos conocimos — <em>(fecha por confirmar)</em></div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-date">🗓 Hito 2</div>
+      <div class="tl-text">Primer viaje juntos — <em>(por confirmar)</em></div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-date">🗓 Hito 3</div>
+      <div class="tl-text">La propuesta 💍 — <em>(por confirmar)</em></div>
+    </div>
+    <div class="tl-item">
+      <div class="tl-date">17 Nov 2026</div>
+      <div class="tl-text">¡Nos casamos! 🎉</div>
+    </div>
+  </div>
+
   <div class="gallery-grid">
     <img src="assets/foto-pareja.jpg" alt="Alejandro y Kuilen" onclick="this.requestFullscreen()">
   </div>
+
   <div style="text-align:center; margin: 40px 0;">
     <a class="btn btn-ghost" href="index.html" style="border-color:var(--color-primary); color:var(--color-primary);">← Volver</a>
   </div>
