@@ -12,6 +12,7 @@
   .video-box { background: #fff; border-radius: 14px; padding: 30px; text-align: center; box-shadow: 0 3px 14px rgba(60,36,21,0.08); margin: 36px 0 10px; }
   .video-box .video-placeholder { font-size: 3.5rem; margin-bottom: 8px; }
   .video-box p { opacity: 0.8; }
+  .video-box video { width: 100%; max-width: 640px; border-radius: 12px; margin-top: 12px; }
   .timeline { position: relative; max-width: 620px; margin: 40px auto 0; padding-left: 30px; }
   .timeline::before { content: ''; position: absolute; left: 8px; top: 4px; bottom: 4px; width: 2px; background: var(--color-secondary); }
   .tl-item { position: relative; padding: 0 0 26px 22px; }
@@ -33,11 +34,14 @@
 </header>
 
 <main class="container">
-  <!-- 🎬 Video propuesta (se agrega cuando llegue de Alejandro) -->
+  <!-- 🎬 Video de la propuesta -->
   <div class="video-box" id="video-propuesta">
-    <div class="video-placeholder">🎬</div>
-    <p><strong>Video de la propuesta</strong></p>
-    <p>Próximamente...</p>
+    <div class="video-placeholder">💍</div>
+    <p><strong>El día que dijo que sí</strong></p>
+    <video controls preload="metadata" poster="assets/foto-pareja.jpg">
+      <source src="assets/video-propuesta-matrimonio.mp4" type="video/mp4">
+      Tu navegador no soporta video HTML5.
+    </video>
   </div>
 
   <h2 class="section-title">Nuestros hitos</h2>
@@ -86,6 +90,23 @@
     <figure>
       <img src="assets/machupicchu/machupicchu-6.jpg" alt="Escaleras de piedra con arco" onclick="this.requestFullscreen()">
       <figcaption>Explorando ruinas</figcaption>
+    </figure>
+  </div>
+
+  <h2 class="section-title">Corea 🇰🇷 — Septiembre 2024</h2>
+  <p class="section-sub">Nuestro viaje con hanbok por los palacios</p>
+  <div class="gallery-grid">
+    <figure>
+      <img src="assets/corea/corea-1.jpg" alt="Bailando con hanbok en el palacio" onclick="this.requestFullscreen()">
+      <figcaption>Hanbok y alegría</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/corea/corea-2.jpg" alt="Tomados de la mano en el patio del palacio" onclick="this.requestFullscreen()">
+      <figcaption>Patio del palacio</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/corea/corea-3.jpg" alt="Calle nocturna con mural colorido" onclick="this.requestFullscreen()">
+      <figcaption>Noche en Corea</figcaption>
     </figure>
   </div>
 
