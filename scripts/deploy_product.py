@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
-"""Deploy del MICROSITIO nupcial al subdominio de Bluehost (con check de encoding).
+"""Deploy del sitio PRODUCTO (noscasamos.vip) al docroot raíz de Bluehost.
 
 Arquitectura (docs/PRODUCTO-DOMINIO-WEB-METAAPP.md):
-- noscasamos.vip (root)          = sitio PRODUCTO  → deploy_product.py
-- {boda}.noscasamos.vip (subdom) = micrositio invitados → ESTE script
+- noscasamos.vip (root)          = sitio PRODUCTO  → ESTE script
+- {boda}.noscasamos.vip (subdom) = micrositio invitados → deploy_site.py
 
 Flujo:
-1. Corre scripts/check_encoding.py sobre site/ (aborta si hay BOM/mojibake)
-2. scp de los archivos al docroot del subdominio
-3. Verifica con curl que el servidor responde 200 y los caracteres están bien
+1. Corre scripts/check_encoding.py sobre product-site/ (aborta si hay BOM/mojibake)
+2. scp de los archivos al docroot raíz
+3. Verifica con curl que el servidor responde 200
 
-Uso: python scripts/deploy_site.py
-Reglas de encoding: docs/DIAGNOSTICO-ENCODING-SITIO-2026-08-03.md
+Uso: python scripts/deploy_product.py
 """
 import os, subprocess, sys
 
 WS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))  # projects/wedding-planner
-SITE = os.path.join(WS, "site")
+SITE = os.path.join(WS, "product-site")
 KEY = os.path.join(os.path.dirname(os.path.dirname(WS)), ".secrets", "bluehost_tupibox_key")  # workspace/.secrets
 HOST = "tupiboxc@50.6.18.31"
-DOCROOT = "/home2/tupiboxc/alejandro-kuilen.noscasamos.vip"
-HOST_HEADER = "alejandro-kuilen.noscasamos.vip"
+DOCROOT = "/home2/tupiboxc/noscasamos.vip"
+HOST_HEADER = "noscasamos.vip"
 
 def run(cmd):
     print(">", " ".join(cmd))
@@ -39,8 +38,8 @@ def main():
         print("ABORTADO: hay archivos con problemas de encoding. Corregir antes de subir.")
         return 1
 
-    # Paso 2: scp al docroot del subdominio (micrositio SOLO aquí)
-    print("\n=== [2/3] Subiendo al servidor (subdominio) ===")
+    # Paso 2: scp al docroot raíz
+    print("\n=== [2/3] Subiendo al servidor (docroot raíz) ===")
     files = []
     for root, _dirs, fs in os.walk(SITE):
         for fn in sorted(fs):
@@ -52,13 +51,14 @@ def main():
 
     # Paso 3: verificación
     print("\n=== [3/3] Verificación en servidor ===")
-    for page in ["index.html", "info.html", "rsvp.html", "galeria.html", "regalos.html", "confirmado.html", "no-confirmado.html"]:
+    for page in ["index.html", "como-funciona.html", "precios.html", "contacto.html",
+                 "css/style.css", "assets/hero.jpg"]:
         r = subprocess.run(["curl.exe", "-s", "-o", "NUL", "-w", "%{http_code}",
                             "-H", f"Host: {HOST_HEADER}", f"http://50.6.18.31/{page}"],
                            capture_output=True, text=True)
         print(f"  {page}: {r.stdout.strip()}")
 
-    print("\nDeploy completado. Recordar: DNS aún puede estar propagando (24-48h).")
+    print("\nDeploy completado (sitio producto en noscasamos.vip).")
     return 0
 
 if __name__ == "__main__":

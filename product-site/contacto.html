@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contacto — No Nos Casamos</title>
+<meta name="description" content="Cuéntanos de tu boda y armamos tu bot de WhatsApp. Respondemos el mismo día.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="index.html">No Nos Casamos<span class="brand-dot">.</span></a>
+    <nav class="main-nav">
+      <a href="index.html">Inicio</a>
+      <a href="como-funciona.html">Cómo funciona</a>
+      <a href="precios.html">Precios</a>
+      <a href="contacto.html">Contacto</a>
+    </nav>
+    <a class="btn btn-primary btn-sm" href="contacto.html">Quiero esto para mi boda</a>
+  </div>
+</header>
+
+<main>
+  <section class="section">
+    <div class="container">
+      <h1 class="section-title">Hablemos de tu boda</h1>
+      <p class="section-sub">Cuéntanos la fecha y el lugar. Te mostramos cómo quedaría todo en 24 horas.</p>
+
+      <div class="contact-grid">
+        <div class="contact-info">
+          <h3>📅 ¿Cuándo te casas?</h3>
+          <p>Recomendamos partir al menos <strong>2 meses antes</strong> para aprovechar los recordatorios y el seguimiento de confirmaciones.</p>
+
+          <h3>💬 La vía más rápida</h3>
+          <p>Escríbenos directo por WhatsApp y te respondemos el mismo día:</p>
+          <a class="contact-wa" href="https://wa.me/56994635497?text=Hola!%20Quiero%20saber%20m%C3%A1s%20de%20No%20Nos%20Casamos%20para%20mi%20boda" target="_blank">💬 Escribir por WhatsApp</a>
+
+          <h3>📍 Dónde estamos</h3>
+          <p>Operamos en todo Chile. Reuniones de setup por videollamada — no necesitas mojarte.</p>
+        </div>
+
+        <form class="contact-form" action="https://wa.me/56994635497" method="get" target="_blank">
+          <label for="name">Tus nombres (novio/novia)</label>
+          <input type="text" id="name" name="text" placeholder="Alejandro y Kuilen" required>
+
+          <label for="fecha">Fecha de la boda</label>
+          <input type="text" id="fecha" name="text" placeholder="17 Nov 2026" required>
+
+          <label for="ciudad">Ciudad / Región</label>
+          <input type="text" id="ciudad" name="text" placeholder="Santiago">
+
+          <label for="invitados">N° estimado de invitados</label>
+          <select id="invitados" name="text">
+            <option>Menos de 50</option>
+            <option selected>50 - 150</option>
+            <option>150 - 300</option>
+            <option>Más de 300</option>
+          </select>
+
+          <label for="plan">Plan de interés</label>
+          <select id="plan" name="text">
+            <option>Esencial ($49.990 setup)</option>
+            <option selected>Completo ($79.990 setup)</option>
+            <option>Premium ($119.990 setup)</option>
+            <option>Solo micrositio ($39.990)</option>
+          </select>
+
+          <label for="msg">Cuéntanos más (opcional)</label>
+          <textarea id="msg" name="text" rows="3" placeholder="Dress code, ceremonia + recepción, datos especiales..."></textarea>
+
+          <button class="btn btn-primary" type="submit" style="border:none; cursor:pointer;">Enviar por WhatsApp →</button>
+          <p style="font-size:.78rem; opacity:.6; text-align:center;">Se abre WhatsApp con tu consulta lista para enviar.</p>
+        </form>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="container footer-inner">
+    <div>
+      <p class="footer-brand">No Nos Casamos<span class="brand-dot">.</span></p>
+      <p>WhatsApp automático para bodas en Chile.</p>
+    </div>
+    <div class="footer-links">
+      <a href="index.html">Inicio</a>
+      <a href="como-funciona.html">Cómo funciona</a>
+      <a href="precios.html">Precios</a>
+      <a href="contacto.html">Contacto</a>
+    </div>
+  </div>
+  <p class="footer-copy">© 2026 No Nos Casamos · Hecho con 💌 para parejas chilenas</p>
+</footer>
+
+<a class="wa-float" href="https://wa.me/56994635497?text=Hola!%20Quiero%20saber%20m%C3%A1s%20de%20No%20Nos%20Casamos%20para%20mi%20boda" target="_blank" aria-label="WhatsApp">💬</a>
+</body>
+</html>

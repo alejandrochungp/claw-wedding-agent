@@ -146,12 +146,15 @@ El cPanel de Bluehost (cuenta `tupiboxc`, sh00634) **no expone creación de addo
 - [x] Crear addon domain `noscasamos.vip` en cPanel Bluehost (03-Ago ✅ vía SSO)
 - [x] Crear subdominio por boda (`alejandro-kuilen.noscasamos.vip`) vía `uapi SubDomain addsubdomain` (03-Ago ✅)
 - [x] Registros A en zona DNS (root + subdominio → 50.6.18.31) ✅
-- [ ] ⏳ Propagación DNS pública (24-48h según Bluehost)
-- [ ] Subir sitio producto + micrositio boda (estructura sección 3)
-- [ ] Crear templates nuevos con botones URL → páginas de confirmación/no confirmación en noscasamos.vip
-- [ ] Verificar suscripción de la app nueva `1590375222487560` al WABA
-- [ ] Probar flujo completo: template → botón → webhook → RSVP → Slack
-- [ ] Implementar bot LLM con DeepSeek Flash (server.js actual usa Claude — migrar)
+- [x] ⏳ Propagación DNS pública — ✅ COMPLETADA (03-Ago 19:00: ambos dominios resuelven a 50.6.18.31 en 8.8.8.8/1.1.1.1)
+- [x] Subir sitio producto + micrositio boda (03-Ago 19:12 ✅): producto en root (4 páginas, imágenes banco Pexels), micrositio en subdominio; scripts `deploy_product.py` / `deploy_site.py`; HTTPS 200 verificado en ambos
+- [x] Crear templates nuevos con botones URL → páginas de confirmación/no confirmación en noscasamos.vip (templates `_img` PENDING aprobación Meta)
+- [x] Verificar suscripción de la app nueva `1590375222487560` al WABA (✅ suscrita 02-Ago)
+- [x] Probar flujo completo: template → botón → webhook → RSVP → Slack (✅ 02-Ago 13:10)
+- [x] Implementar bot LLM con DeepSeek Flash (✅ 02-Ago 13:26, commit `2234c0c`)
+
+### ⚠️ Corrección 03-Ago 19:08 (reporte Alejandro)
+- `noscasamos.vip` mostraba el micrositio (fix apresurado copió micrositio al root). **Corregido:** root = sitio PRODUCTO (landing/como-funciona/precios/contacto, imágenes de banco), subdominio = micrositio. Docroots separados, scripts de deploy separados.
 
 ## Archivos relacionados
 - `docs/PROPUESTA-BOT-LLM-PRODUCTO.md` — propuesta bot LLM + monetización

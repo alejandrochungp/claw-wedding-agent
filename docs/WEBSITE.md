@@ -3,18 +3,18 @@
 > Sitio estático personalizado para cada boda, hosteable en GitHub Pages o Railway Static.
 > URL sugerida: `boda.nombrenovios.cl` o subdominio de `wedding-planner.cl`
 
-## 🌐 Dominios y deploy (Bluehost) — ACTUALIZADO 03-Ago-2026
+## 🌐 Dominios y deploy (Bluehost) — ACTUALIZADO 03-Ago-2026 (19:20)
 
-**El sitio se sirve en DOS dominios** (mismo contenido, docroots espejados):
+**Arquitectura de 2 niveles** (docs/PRODUCTO-DOMINIO-WEB-METAAPP.md §3):
 
-| Dominio | Docroot en servidor (50.6.18.31) | Uso |
-|---------|----------------------------------|-----|
-| `noscasamos.vip` (raíz addon) | `/home2/tupiboxc/noscasamos.vip` | Dominio principal del producto |
-| `alejandro-kuilen.noscasamos.vip` (subdominio) | `/home2/tupiboxc/alejandro-kuilen.noscasamos.vip` | URL corta para invitados (templates WhatsApp) |
+| Dominio | Docroot en servidor (50.6.18.31) | Contenido | Deploy |
+|---------|----------------------------------|-----------|--------|
+| `noscasamos.vip` (raíz addon) | `/home2/tupiboxc/noscasamos.vip` | **Sitio PRODUCTO** (landing/como-funciona/precios/contacto) | `scripts/deploy_product.py` |
+| `alejandro-kuilen.noscasamos.vip` (subdominio) | `/home2/tupiboxc/alejandro-kuilen.noscasamos.vip` | **Micrositio nupcial** (invitados) | `scripts/deploy_site.py` |
 
-**⚠️ Lección (03-Ago):** el docroot raíz quedó VACÍO tras crear el addon domain — el sitio solo vivía en el subdominio y `noscasamos.vip` daba 403. Fix: copiar el sitio a AMBOS docroots. El script `scripts/deploy_site.py` ahora publica en los dos (scp + verificación por Host header) y verifica encoding antes de subir.
+**⚠️ Lección (03-Ago):** el docroot raíz quedó VACÍO tras crear el addon domain → `noscasamos.vip` daba 403. Un fix apresurado copió el micrositio al root (error — Alejandro lo detectó: el root es del PRODUCTO). Fix correcto: micrositio SOLO en subdominio, sitio producto en root, cada uno con su script de deploy (encoding check + scp + curl verify).
 
-**Verificación:** DNS propagado (noscasamos.vip → 50.6.18.31 en resolvers públicos). HTTP y HTTPS responden 200 en todas las páginas y assets de ambos dominios. Los assets (fotos/videos) se suben con `site/assets/` completo (repo = fuente de verdad).
+**Verificación (03-Ago 19:12):** DNS propagado (ambos dominios → 50.6.18.31). HTTPS 200 en todas las páginas: producto (index/como-funciona/precios/contacto/css/hero) y micrositio (index/galeria/video). Los assets del micrositio (fotos/videos) viven SOLO en el subdominio.
 
 ## 🏠 Páginas
 
