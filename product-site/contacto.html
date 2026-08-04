@@ -45,6 +45,9 @@
           <label for="name">Tus nombres (novio/novia)</label>
           <input type="text" id="name" placeholder="Alejandro y Kuilen" required>
 
+          <label for="phone">Tu WhatsApp (opcional)</label>
+          <input type="tel" id="phone" placeholder="+56 9 1234 5678">
+
           <label for="fecha">Fecha de la boda</label>
           <input type="text" id="fecha" placeholder="17 Nov 2026" required>
 
@@ -77,14 +80,35 @@
         document.getElementById('contact-form').addEventListener('submit', function (e) {
           e.preventDefault();
           var name = document.getElementById('name').value.trim();
+          var phone = document.getElementById('phone').value.trim();
           var fecha = document.getElementById('fecha').value.trim();
           var ciudad = document.getElementById('ciudad').value.trim();
           var invitados = document.getElementById('invitados').value;
           var plan = document.getElementById('plan').value;
           var msg = document.getElementById('msg').value.trim();
           if (!name || !fecha) { alert('Completa tus nombres y la fecha de la boda.'); return; }
+
+          // 1) Guardar lead en la BD del producto (Nos Casamos)
+          var lead = {
+            nombres: name,
+            phone: phone || null,
+            fecha_boda: fecha,
+            ciudad: ciudad || null,
+            n_invitados: parseInt((invitados || '').replace(/\D/g, ''), 10) || null,
+            plan_interes: plan,
+            mensaje: msg || null,
+            origen: 'form_sitio'
+          };
+          fetch('https://claw-wedding-agent-production.up.railway.app/api/lead', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lead)
+          }).catch(function () { /* silencioso: wa.me sigue funcionando */ });
+
+          // 2) Abrir WhatsApp con el mensaje pre-armado (fallback/conversación directa)
           var texto = 'Hola! Quiero información de Nos Casamos para mi boda:\n\n'
             + '👤 ' + name + '\n'
+            + (phone ? '📱 ' + phone + '\n' : '')
             + '📅 ' + fecha + '\n'
             + '📍 ' + (ciudad || '-') + '\n'
             + '👥 Invitados: ' + invitados + '\n'

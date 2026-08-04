@@ -188,7 +188,7 @@ const TENANT = {
   id: 'boda-alejandro-kuilen',
   novios: { nombre1: 'Alejandro', nombre2: 'Kuilen' },
   // WhatsApp de los novios (identificables por el bot — Fase 1)
-  noviosPhones: ['56966283141'], // Alejandro (+56 9 6628 3141) — Kuilen pendiente de agregar
+  noviosPhones: ['56966283141', '56956375085'], // Alejandro (+56 9 6628 3141) + Kuilen (+56 9 5637 5085)
   fecha: '2026-11-17',
   hora: '18:00',
   horaNota: 'Sujeto a modificaciones. Por confirmar',
