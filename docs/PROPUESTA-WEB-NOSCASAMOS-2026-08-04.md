@@ -89,13 +89,24 @@
 
 ---
 
-## 5. Fases de implementación (si se aprueba)
-| Fase | Alcance |
-|------|---------|
-| W1 | `index.html`: hero + 3 cards de beneficios renovadas + nota codigonovios |
-| W2 | `como-funciona.html`: 4 pasos + cards "qué incluye" actualizadas |
-| W3 | `precios.html`: menciones de gestión/carta/recordatorios/codigonovios |
-| W4 | Verificación encoding + deploy a ambos docroots (deploy_product.py) + screenshot móvil |
+## 6. ✅ IMPLEMENTADO + DESPLEGADO (04-Ago 19:40) — VERIFICADO
+
+### Aprobado por Alejandro (19:38): las 4 decisiones = SÍ
+1. Hero: **"Tu boda se organiza sola, desde WhatsApp"** ✅
+2. Sección "Gestiona tu lista por WhatsApp" con comandos ✅
+3. codigonovios.cl cruzado en landing y precios ✅
+4. Precios sin cambios de monto ✅
+
+### Cambios aplicados (commit `6e9a112`)
+- **index.html**: hero nuevo + 6 cards renovadas (invitaciones foto+botones, RSVP URL, recordatorios T-30/7/24h, panel novios WhatsApp, parejas sin doble conteo) + sección 🗂 "Gestiona tu lista por WhatsApp" con comandos de ejemplo + nota Código Novios con link
+- **como-funciona.html**: 4 pasos (nos cuentas → agregas invitados por WhatsApp → envías invitación → confirmas y recuerdas) + 6 cards "Qué incluye" actualizadas (carta formal, parejas, panel novios, micrositio+regalos)
+- **precios.html**: Esencial (panel novios, recordatorios T-30/7/24h), Completo (carta formal, parejas 👫), Premium (Código Novios efectivo cada miércoles)
+
+### Verificación
+- Encoding OK + HTTP 200 en las 3 páginas (servidor)
+- Contenido nuevo confirmado en servidor (hero, sección gestión, paso 2, Código Novios en precios)
+- Screenshot móvil (390px): hero y header OK
+- Deploy: scp directo a docroot raíz (deploy_product.py aplica igual)
 
 ---
 
