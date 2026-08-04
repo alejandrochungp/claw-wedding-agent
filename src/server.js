@@ -707,6 +707,35 @@ async function recordTemplateSent(phone, templateName, wamid) {
   await redis.hset('wedding:guests', phone, JSON.stringify(guest));
 }
 
+// F1: migrar wedding:guests de LISTA (estructura vieja) a HASH (nueva)
+async function migrateGuestsToListHash() {
+  try {
+    const type = await redis.type('wedding:guests');
+    if (type !== 'list') return; // ya es hash o no existe
+    console.log('🔄 Migrando wedding:guests de lista → hash...');
+    const entries = await redis.lrange('wedding:guests', 0, -1);
+    const migrados = [];
+    for (const raw of entries) {
+      try {
+        const g = JSON.parse(raw);
+        if (!g.phone) continue;
+        g.stage = g.stage || 'nuevo';
+        g.stageUpdatedAt = g.stageUpdatedAt || g.createdAt || new Date().toISOString();
+        g.templatesSent = g.templatesSent || [];
+        migrados.push(g);
+      } catch (e) { /* entry corrupta, saltar */ }
+    }
+    // hset falla si la key sigue siendo LIST → borrar la lista primero
+    await redis.del('wedding:guests');
+    for (const g of migrados) {
+      await redis.hset('wedding:guests', g.phone, JSON.stringify(g));
+    }
+    console.log(`✅ Migración lista→hash: ${migrados.length} invitados`);
+  } catch (e) {
+    console.error('❌ migrateGuestsToListHash error:', e.message);
+  }
+}
+
 // Enviar invitación (save_the_date_v4_img) a un invitado
 async function sendInviteToGuest(from, phone) {
   const guest = await getGuest(phone);
@@ -1377,6 +1406,7 @@ async function start() {
   }
 
   await initPostgres();
+  await migrateGuestsToListHash(); // F1: lista → hash (compatibilidad con invitados viejos)
 
   app.listen(PORT, () => {
     console.log(`💒 claw-wedding-agent v1.7.0 running on port ${PORT}`);
