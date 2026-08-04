@@ -570,8 +570,8 @@ async function handleNovioCommand(from, text) {
   const lower = text.trim().toLowerCase();
   console.log(`🎛️ Comando novio [${from}]: ${text.slice(0, 100)}`);
 
-  if (/agregar invitado|a[nñ]ade? a|agrega a|nuevo invitado/i.test(lower)) {
-    // Fase 2: parser LLM extrae nombre + WhatsApp (+ correo opcional)
+  if (/agregar|a[nñ]ade?|agrega|nuevo invitado|invitado/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
+    // Fase 2: parser extrae nombre + WhatsApp (+ correo opcional)
     await addGuestViaChat(from, text);
     return;
   }
