@@ -116,7 +116,7 @@ Los detalles te llegan después con la invitación formal. Por ahora solo dime s
 ## Template 1d: `save_the_date_v4_img` ✅ (URL BUTTONS + IMAGE HEADER) — 03-Ago
 
 **Meta ID:** `1585195933335096`
-**Status:** PENDING (creado 03-Ago-2026 16:55)
+**Status:** ✅ APPROVED (verificado 04-Ago-2026 12:30)
 **Categoría:** MARKETING | **Idioma:** es
 
 > Recreación de `save_the_date_v4` con **header IMAGE** (foto pareja vía Resumable Upload API, mismo flujo que v3).
