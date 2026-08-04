@@ -554,6 +554,12 @@ async function handleRsvpFormMessage(from, text) {
     console.error('❌ RSVP form save error:', err.message);
   }
 
+  // F1: actualizar stage del invitado según su respuesta
+  const stageFromStatus = status.includes('Confirmado') ? 'confirmado'
+    : status.includes('No asistirá') ? 'no_asistira'
+    : 'tal_vez';
+  await updateGuestStage(from, stageFromStatus);
+
   await notifySlack(`🎉 *RSVP FORM* \`${from}\`: ${status}${d.nombre ? ` — ${d.nombre}` : ''}${d.acompanantes && d.acompanantes !== '0' ? ` (${d.acompanantes} acompañantes)` : ''}`);
 
   // Respuesta de confirmación al remitente
@@ -573,6 +579,19 @@ async function handleNovioCommand(from, text) {
   if (/agregar|a[nñ]ade?|agrega|nuevo invitado|invitado/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
     // Fase 2: parser extrae nombre + WhatsApp (+ correo opcional)
     await addGuestViaChat(from, text);
+    return;
+  }
+
+  // F1: enviar invitación a un invitado específico
+  if (/enviar invitaci[oó]n a|invitar a/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
+    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+    await sendInviteToGuest(from, normalizePhone(phoneMatch[0]));
+    return;
+  }
+
+  // F1: batch a todos los pendientes
+  if (/enviar invitaci[oó]n a todos|invitar a todos|enviar a todos los pendientes/i.test(lower)) {
+    await sendInviteToAll(from);
     return;
   }
 
@@ -642,17 +661,104 @@ async function addGuestViaChat(from, text) {
   namePart = namePart.replace(/^(a|al|la|el)\s+/i, '').trim();
   const name = namePart || phone;
 
-  // Guardar invitado en Redis (lista de invitados de la boda)
+  // Guardar invitado en Redis (hash: phone → guest JSON, con ciclo de vida F1)
   try {
     const guestKey = 'wedding:guests';
-    await redis.rpush(guestKey, JSON.stringify({ name, phone, email, addedBy: from, createdAt: new Date().toISOString() }));
+    const guest = {
+      name, phone, email, addedBy: from, createdAt: new Date().toISOString(),
+      stage: 'nuevo',                                    // ← F1: ciclo de vida
+      stageUpdatedAt: new Date().toISOString(),
+      templatesSent: [],                                 // ← F1: historial de envíos
+    };
+    await redis.hset(guestKey, phone, JSON.stringify(guest));
     // Registrar actor como invitado
     await registerActor(phone, 'invitado', { name, email });
     await notifySlack(`➕ *Invitado agregado por novio* \`${from}\`:\n👤 ${name}\n📱 ${phone}${email ? `\n📧 ${email}` : ''}`);
-    await sendWhatsAppMessage(from, `✅ Agregué a *${name}* (${phone})${email ? `, correo ${email}` : ''} a los invitados.\n\n¿Quieres agregar a alguien más?`);
+    await sendWhatsAppMessage(from, `✅ Agregué a *${name}* (${phone})${email ? `, correo ${email}` : ''} a los invitados (stage: nuevo).\n\n➡️ Cuando quieras, envía la invitación con: *"enviar invitación a ${phone}"*`);
   } catch (e) {
     console.error('❌ addGuestViaChat error:', e.message);
     await sendWhatsAppMessage(from, '⚠️ No pude guardar el invitado. Inténtalo de nuevo.');
+  }
+}
+
+// ── F1: helpers ciclo de vida de invitados ──────────────────
+async function getGuest(phone) {
+  try {
+    const raw = await redis.hget('wedding:guests', phone);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+async function updateGuestStage(phone, stage) {
+  const guest = await getGuest(phone);
+  if (!guest) return;
+  guest.stage = stage;
+  guest.stageUpdatedAt = new Date().toISOString();
+  await redis.hset('wedding:guests', phone, JSON.stringify(guest));
+  console.log(`🎯 Stage ${phone}: → ${stage}`);
+  return guest;
+}
+
+async function recordTemplateSent(phone, templateName, wamid) {
+  const guest = await getGuest(phone);
+  if (!guest) return;
+  guest.templatesSent = guest.templatesSent || [];
+  guest.templatesSent.push({ name: templateName, ts: new Date().toISOString(), wamid: wamid || null });
+  await redis.hset('wedding:guests', phone, JSON.stringify(guest));
+}
+
+// Enviar invitación (save_the_date_v4_img) a un invitado
+async function sendInviteToGuest(from, phone) {
+  const guest = await getGuest(phone);
+  if (!guest) {
+    await sendWhatsAppMessage(from, `⚠️ *${phone}* no está en la lista de invitados.\n\n➡️ Primero agrégalo: *"agregar a Nombre ${phone}"*`);
+    return;
+  }
+  // Dedupe: si ya tiene invitación enviada y no está en 'nuevo', avisar
+  const already = (guest.templatesSent || []).some(t => t.name === 'save_the_date_v4_img');
+  if (already && guest.stage !== 'nuevo') {
+    await sendWhatsAppMessage(from, `ℹ️ A *${guest.name}* ya se le envió la invitación (stage: ${guest.stage}).`);
+    return;
+  }
+  const result = await sendTemplate(phone, 'save_the_date_v4_img', [guest.nombre1 || '']);
+  if (result?.messages?.[0]?.id) {
+    await recordTemplateSent(phone, 'save_the_date_v4_img', result.messages[0].id);
+    await updateGuestStage(phone, 'invitacion_enviada');
+    await sendWhatsAppMessage(from, `✅ Invitación enviada a *${guest.name}* (${phone}).\nStage: invitacion_enviada`);
+    await notifySlack(`📨 *Invitación enviada* a \`${guest.name}\` (${phone}) por comando del novio`);
+  } else {
+    await sendWhatsAppMessage(from, `❌ No se pudo enviar la invitación a ${phone}. Verifica que tenga conversación abierta o el template aprobado.`);
+  }
+}
+
+// Batch: enviar invitación a todos los pendientes (stage: nuevo)
+async function sendInviteToAll(from) {
+  try {
+    const all = await redis.hgetall('wedding:guests');
+    const pendientes = Object.entries(all)
+      .map(([phone, raw]) => ({ phone, ...JSON.parse(raw) }))
+      .filter(g => g.stage === 'nuevo');
+    if (!pendientes.length) {
+      await sendWhatsAppMessage(from, '✅ No hay invitados pendientes (todos tienen invitación enviada o ya respondieron).');
+      return;
+    }
+    let ok = 0, fail = 0;
+    for (const g of pendientes) {
+      const result = await sendTemplate(g.phone, 'save_the_date_v4_img', []);
+      if (result?.messages?.[0]?.id) {
+        await recordTemplateSent(g.phone, 'save_the_date_v4_img', result.messages[0].id);
+        await updateGuestStage(g.phone, 'invitacion_enviada');
+        ok++;
+      } else {
+        fail++;
+      }
+      await new Promise(r => setTimeout(r, 300)); // rate limit
+    }
+    await sendWhatsAppMessage(from, `📨 *Batch completado:* enviadas ${ok} / fallidas ${fail} / total pendientes ${pendientes.length}`);
+    await notifySlack(`📨 *Batch invitaciones:* ${ok} enviadas, ${fail} fallidas`);
+  } catch (e) {
+    console.error('❌ sendInviteToAll error:', e.message);
+    await sendWhatsAppMessage(from, '⚠️ Error en el batch de invitaciones.');
   }
 }
 
@@ -713,11 +819,13 @@ async function handleTextRSVP(from, text) {
     const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs (${TENANT.horaNota})\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
     await sendWhatsAppMessage(from, confirmMsg);
     await saveRSVP(from, '✅ Confirmado (texto)', text);
+    await updateGuestStage(from, 'confirmado'); // F1
     await notifySlack(`🎉 *RSVP CONFIRMADO (LLM)* \`${from}\`: "${text.slice(0, 100)}"`);
   } else if (intent === 'decline') {
     const declineMsg = `Gracias por avisarnos, lo entendemos completamente 🫶\n\nTe tendremos presente ese día. ¡Un abrazo!`;
     await sendWhatsAppMessage(from, declineMsg);
     await saveRSVP(from, '❌ No asistirá (texto)', text);
+    await updateGuestStage(from, 'no_asistira'); // F1
     await notifySlack(`💔 *NO ASISTIRÁ (LLM)* \`${from}\`: "${text.slice(0, 100)}"`);
   } else {
     // Unknown intent — use Claude to generate a natural reply
@@ -783,12 +891,14 @@ async function handleButtonReply(from, buttonId, buttonText) {
     const confirmMsg = `¡Gracias por confirmar, nos alegra mucho! 🎉\n\n📅 Agregá el evento a tu calendario:\n${TENANT.calendarUrl}\n\n📍 ${TENANT.lugar}\n🕕 ${TENANT.hora} hrs (${TENANT.horaNota})\n👔 ${TENANT.dressCode}\n\nPronto te llegará la invitación formal. ¡Nos vemos! ✨`;
     await sendWhatsAppMessage(from, confirmMsg);
     await saveRSVP(from, '✅ Confirmado (botón)', buttonText);
+    await updateGuestStage(from, 'confirmado'); // F1
     await notifySlack(`🎉 *RSVP CONFIRMADO* \`${from}\``);
 
   } else if (isDecline) {
     const declineMsg = `Gracias por avisarnos, lo entendemos completamente 🫶\n\nTe tendremos presente ese día. ¡Un abrazo!`;
     await sendWhatsAppMessage(from, declineMsg);
     await saveRSVP(from, '❌ No asistirá (botón)', buttonText);
+    await updateGuestStage(from, 'no_asistira'); // F1
     await notifySlack(`💔 *NO ASISTIRÁ* \`${from}\``);
   }
 }
@@ -1230,12 +1340,28 @@ app.get('/admin/leads', async (_req, res) => {
   res.json({ total: leads.length, leads });
 });
 
-// GET /admin/guests — lista de invitados agregados por novios
+// GET /admin/guests — lista de invitados agregados por novios (hash, con stage F1)
 app.get('/admin/guests', async (_req, res) => {
   try {
-    const entries = await redis.lrange('wedding:guests', 0, -1);
-    const guests = entries.map(e => JSON.parse(e));
+    const all = await redis.hgetall('wedding:guests');
+    const guests = Object.entries(all).map(([phone, raw]) => ({ phone, ...JSON.parse(raw) }));
     res.json({ total: guests.length, guests });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /admin/guest-states — resumen de invitados por stage (F1)
+app.get('/admin/guest-states', async (_req, res) => {
+  try {
+    const all = await redis.hgetall('wedding:guests');
+    const guests = Object.entries(all).map(([phone, raw]) => ({ phone, ...JSON.parse(raw) }));
+    const byStage = {};
+    for (const g of guests) {
+      const s = g.stage || 'sin_stage';
+      byStage[s] = (byStage[s] || 0) + 1;
+    }
+    res.json({ total: guests.length, byStage, guests: guests.map(g => ({ phone: g.phone, name: g.name, stage: g.stage || 'sin_stage', templatesSent: (g.templatesSent || []).length })) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
