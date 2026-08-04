@@ -32,14 +32,18 @@
 
 **Objetivo:** el bot sabe quién escribe (novio / invitado / lead) y responde con el rol correcto.
 
-### Tareas
-- [ ] 1.1 Crear keys Redis `wa:actor:{phone}` → `{ role, boda_id, novios, email, createdAt }`
-- [ ] 1.2 Registrar novios en onboarding (por su WhatsApp)
-- [ ] 1.3 Lookup de rol al inicio de cada mensaje entrante (prioridad: novio > invitado > lead)
-- [ ] 1.4 Modo **lead**: flujo comercial (planes/precios/captura datos → Notion/Redis)
-- [ ] 1.5 Verificación: 3 números de prueba (novio, invitado, lead) → respuestas correctas
+### ✅ IMPLEMENTADO + DESPLEGADO (04-Ago 12:00, v1.7.0)
 
-**Docs:** `docs/AGENTE-DUAL-INVITADOS-CLIENTES.md`
+### Tareas
+- [x] 1.1 Keys Redis `wedding:actors` → `{ role, boda_id, novios, email, createdAt }` + función `getActorRole()` (prioridad novio > invitado > lead)
+- [x] 1.2 Registrar novios: `TENANT.noviosPhones = ['56966283141']` (Alejandro; Kuilen pendiente)
+- [x] 1.3 Lookup de rol al inicio de cada mensaje entrante + routing: botones SIEMPRE RSVP; novio → comandos; lead + intención comercial → flujo comercial; resto → invitado
+- [x] 1.4 Modo **lead**: flujo comercial (planes/precios) + guarda en Postgres `leads` (origen whatsapp_bot)
+- [x] 1.5 Verificación: simulate lead (`56999998888` → guardó lead) + novio (`56966283141` → comando) ✅
+- [ ] 1.6 (pendiente) WhatsApp de Kuilen a noviosPhones
+- [ ] 1.7 (pendiente) Verificación end-to-end con WhatsApp real (invitado toca botón → RSVP normal)
+
+**Detalle:** `docs/IMPLEMENTACION-FASE1-FASE7-2026-08-04.md` · Diseño: `docs/AGENTE-DUAL-INVITADOS-CLIENTES.md`
 
 ---
 
@@ -123,40 +127,21 @@
 
 **Objetivo:** cuando un lead cae para el producto (Nos Casamos), que quede **almacenado en una base de datos propia** — NO mezclar con la lista de invitados de la boda — para poder referenciar los datos de los futuros novios y hacerles **seguimiento con una estrategia de marketing (aún por definir)**.
 
-### Requisitos (definidos por Alejandro)
-- Almacenar TODO lead que contacte por el producto (form contacto del sitio + WhatsApp del bot en modo lead)
-- BD/colección **separada** de `invitados` (contextos distintos: invitado ≠ prospecto)
-- Poder referenciar los datos enviados por los futuros novios
-- Base para campañas de marketing futuras (follow-up, nurturing)
+### ✅ Postgres CREADO + TABLA leads + ENDPOINTS (04-Ago 11:30-12:00)
 
-### Diseño propuesto (pendiente validación)
-| Campo | Tipo | Nota |
-|-------|------|------|
-| `id` | UUID | PK |
-| `phone` | string | WhatsApp (único por lead) |
-| `email` | string | del form contacto |
-| `nombres` | string | novio/novia |
-| `fecha_boda` | date | |
-| `ciudad` | string | |
-| `n_invitados` | int | |
-| `plan_interes` | enum | Esencial/Completo/Premium/Solo micrositio |
-| `mensaje` | text | |
-| `origen` | enum | form_sitio / whatsapp_bot / otro |
-| `estado` | enum | nuevo / contactado / calificado / cerrado / perdido |
-| `createdAt` / `updatedAt` | datetime | |
-| `notas_marketing` | text | seguimiento interno |
+### Estado
+- [x] 7.0 Postgres agregado a Railway (`railway add -d postgres`) + `DATABASE_URL` seteada en servicio app
+- [x] 7.1 Tabla `leads` creada (SERIAL PK, phone UNIQUE, email, nombres, fecha_boda, ciudad, n_invitados, plan_interes, mensaje, origen, estado, notas_marketing, timestamps) — upsert por phone
+- [x] 7.2 Endpoint `POST /api/lead` (form sitio producto) — verificado HTTP 200, id=1
+- [x] 7.3 Modo lead del bot → guarda en BD (origen whatsapp_bot) — verificado (lead id=2)
+- [x] 7.4 `GET /admin/leads` (seguimiento) + `GET /admin/guests` — verificados
+- [ ] 7.5 Conectar form de contacto del sitio (hoy solo wa.me; agregar fetch → /api/lead)
+- [ ] 7.6 Pipeline de estados + panel simple de seguimiento
+- [ ] 7.7 (futuro) Estrategia de marketing: campañas WhatsApp/email a leads no convertidos
 
-**Opciones de almacenamiento (evaluar):**
-- **A) Redis hash** (`lead:{phone}`) — rápido, ya en el stack, pero sin queries complejas
-- **B) Notion DB "Leads Nos Casamos"** — visible/editable, ya usamos Notion; gratis hasta 1000 filas
-- **C) Postgres (Railway)** — escalable, queries de marketing (recomendado para estrategia futura)
+**Storage elegido:** Postgres (recomendado para queries de marketing futuras). Redis sigue para sesiones/RSVP/invitados.
 
-### Tareas (NO ejecutadas — esperando aprobación)
-- [ ] 7.1 Decidir storage (A/B/C) + crear DB/colección
-- [ ] 7.2 Hook en form de contacto del sitio (POST a Railway en vez de solo wa.me)
-- [ ] 7.3 Modo lead del bot: al detectar prospecto → guardar en BD de leads
-- [ ] 7.4 Pipeline de estados + panel simple de seguimiento
-- [ ] 7.5 (futuro) Estrategia de marketing: campañas WhatsApp/email a leads no convertidos
+**Detalle:** `docs/IMPLEMENTACION-FASE1-FASE7-2026-08-04.md`
 
 ---
 
