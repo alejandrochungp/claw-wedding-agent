@@ -658,6 +658,54 @@ async function handleNovioCommand(from, text) {
     return;
   }
 
+  // G3: reenviar invitación (sin dedupe)
+  if (/reenviar invitaci[oó]n a|reenviar a/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
+    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+    await sendInviteToGuest(from, normalizePhone(phoneMatch[0]), { force: true });
+    return;
+  }
+
+  // G4: editar invitado (correo / nombre / teléfono)
+  // editar correo de {phone} a {email}
+  if (/editar correo de/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text) && /[\w.+-]+@[\w-]+\.[\w.]+/.test(text)) {
+    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+    const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
+    const phone = normalizePhone(phoneMatch[0]);
+    const res = await editGuest(phone, 'email', emailMatch[0]);
+    if (res.ok) await sendWhatsAppMessage(from, `✅ Correo de *${res.guest.name}* actualizado: ${res.changed.from} → ${res.changed.to}`);
+    else await sendWhatsAppMessage(from, `⚠️ No pude editar: ${res.reason === 'no_existe' ? 'el invitado no existe' : 'error'}`);
+    return;
+  }
+
+  // editar nombre de {phone} a {nombre}
+  if (/editar nombre de/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
+    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+    const phone = normalizePhone(phoneMatch[0]);
+    const name = text.split('a ').pop().trim();
+    if (!name || name === phone) {
+      await sendWhatsAppMessage(from, `⚠️ Formato: *"editar nombre de {phone} a {Nombre}"*`);
+      return;
+    }
+    const res = await editGuest(phone, 'name', name);
+    if (res.ok) await sendWhatsAppMessage(from, `✅ Nombre de *${res.changed.from}* actualizado a *${res.changed.to}* (${phone}).`);
+    else await sendWhatsAppMessage(from, `⚠️ No pude editar: ${res.reason === 'no_existe' ? 'el invitado no existe' : 'error'}`);
+    return;
+  }
+
+  // editar teléfono de {viejo} a {nuevo} — reemplaza con aviso
+  if (/editar tel[eé]fono de/i.test(lower) && (text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || []).length >= 2) {
+    const phones = (text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || []).map(p => normalizePhone(p));
+    const res = await editGuest(phones[0], 'phone', phones[1]);
+    if (res.ok) {
+      await sendWhatsAppMessage(from, `✅ Teléfono de *${res.guest.name}* actualizado: ${res.changed.from} → ${res.changed.to}\n⚠️ El teléfono anterior fue *reemplazado* (ya no es válido).`);
+      await notifySlack(`✏️ *Teléfono actualizado* por novio: ${res.guest.name} ${res.changed.from} → ${res.changed.to}`);
+    } else {
+      const msg = { no_existe: 'el invitado no existe', phone_en_uso: 'el nuevo teléfono ya está en la lista', mismo_phone: 'el teléfono es el mismo' }[res.reason] || 'error';
+      await sendWhatsAppMessage(from, `⚠️ No pude editar el teléfono: ${msg}.`);
+    }
+    return;
+  }
+
   // F1: batch a todos los pendientes
   if (/enviar invitaci[oó]n a todos|invitar a todos|enviar a todos los pendientes/i.test(lower)) {
     await sendInviteToAll(from);
@@ -704,7 +752,7 @@ async function handleNovioCommand(from, text) {
   }
 
   // Comando no reconocido — menú rápido
-  await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar a {nombre} +56 9..."* — añadir invitado (o pareja: *"agregar a A +56 9... y B +56 9..."*)\n📨 *"enviar invitación a {phone}"* — enviar save-the-date a uno\n📨 *"enviar invitación a todos"* — batch a pendientes\n📋 *"ver invitados"* — listado con stages\n📊 *"ver confirmaciones"* — estado RSVP\n👫 *"vincular pareja {p1} {p2}"* — vincular 2 invitados (fix +1)\n🗑️ *"eliminar invitado {phone}"* — eliminar (con confirmación)\n\n¿Qué necesitas?`);
+  await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar a {nombre} +56 9..."* — añadir invitado (o pareja: *"agregar a A +56 9... y B +56 9..."*)\n📨 *"enviar invitación a {phone}"* — enviar save-the-date a uno\n📨 *"reenviar invitación a {phone}"* — reenviar sin dedupe\n📨 *"enviar invitación a todos"* — batch a pendientes\n📋 *"ver invitados"* — listado con stages\n📊 *"ver confirmaciones"* — estado RSVP\n👫 *"vincular pareja {p1} {p2}"* — vincular 2 invitados (fix +1)\n✏️ *"editar correo/nombre/teléfono de {phone} a ..."* — editar invitado\n🗑️ *"eliminar invitado {phone}"* — eliminar (con confirmación)\n\n¿Qué necesitas?`);
 }
 
 // ── Fase 2: agregar invitado conversacional (soporta PAREJAS 👫) ──
@@ -838,6 +886,45 @@ async function linkCouple(phone1, phone2) {
   return { ok: true, coupleId, g1, g2 };
 }
 
+// ── G4: editar invitado (correo / nombre / teléfono) ──
+async function editGuest(phone, field, value) {
+  const guest = await getGuest(phone);
+  if (!guest) return { ok: false, reason: 'no_existe' };
+
+  if (field === 'phone') {
+    // Reemplazar teléfono: mover registro + actualizar pareja + actor
+    const newPhone = normalizePhone(value);
+    if (newPhone === phone) return { ok: false, reason: 'mismo_phone' };
+    if (await getGuest(newPhone)) return { ok: false, reason: 'phone_en_uso' };
+    await redis.hdel('wedding:guests', phone);
+    guest.phone = newPhone;
+    await redis.hset('wedding:guests', newPhone, JSON.stringify(guest));
+    // Actualizar partnerPhone del otro miembro de la pareja
+    if (guest.coupleId && guest.partnerPhone) {
+      const partner = await getGuest(guest.partnerPhone);
+      if (partner) {
+        partner.partnerPhone = newPhone;
+        await redis.hset('wedding:guests', partner.phone, JSON.stringify(partner));
+      }
+    }
+    // Re-registrar actor
+    try { await redis.hdel(ACTOR_KEY, phone); } catch (e) { /* ignore */ }
+    await registerActor(newPhone, 'invitado', { name: guest.name, email: guest.email });
+    console.log(`✏️ Teléfono actualizado: ${phone} → ${newPhone} (${guest.name})`);
+    return { ok: true, guest, changed: { from: phone, to: newPhone } };
+  }
+
+  if (field === 'name' || field === 'email') {
+    const old = guest[field];
+    guest[field] = value;
+    await redis.hset('wedding:guests', phone, JSON.stringify(guest));
+    console.log(`✏️ ${field} actualizado para ${phone}: ${old} → ${value}`);
+    return { ok: true, guest, changed: { field, from: old, to: value } };
+  }
+
+  return { ok: false, reason: 'campo_invalido' };
+}
+
 // ── Stats con absorción de parejas (fix +1 duplicado) ──
 async function getConfirmedStats() {
   const entries = await redis.lrange(RSVP_KEY, 0, -1);
@@ -905,16 +992,16 @@ async function migrateGuestsToListHash() {
 const SAVE_THE_DATE_IMG_URL = (TENANT.siteUrl || 'https://alejandro-kuilen.noscasamos.vip').replace(/\/$/, '') + '/assets/foto-pareja.jpg';
 
 // Enviar invitación (save_the_date_v4_img con header IMAGE) a un invitado
-async function sendInviteToGuest(from, phone) {
+async function sendInviteToGuest(from, phone, opts = {}) {
   const guest = await getGuest(phone);
   if (!guest) {
     await sendWhatsAppMessage(from, `⚠️ *${phone}* no está en la lista de invitados.\n\n➡️ Primero agrégalo: *"agregar a Nombre ${phone}"*`);
     return;
   }
-  // Dedupe: si ya tiene invitación enviada y no está en 'nuevo', avisar
+  // Dedupe: si ya tiene invitación enviada y no está en 'nuevo', avisar (salvo force/reenvío)
   const already = (guest.templatesSent || []).some(t => t.name === 'save_the_date_v4_img');
-  if (already && guest.stage !== 'nuevo') {
-    await sendWhatsAppMessage(from, `ℹ️ A *${guest.name}* ya se le envió la invitación (stage: ${guest.stage}).`);
+  if (already && guest.stage !== 'nuevo' && !opts.force) {
+    await sendWhatsAppMessage(from, `ℹ️ A *${guest.name}* ya se le envió la invitación (stage: ${guest.stage}).\n\n➡️ Si quieres reenviarla igual: *"reenviar invitación a ${phone}"*`);
     return;
   }
   try {
@@ -923,8 +1010,13 @@ async function sendInviteToGuest(from, phone) {
     if (result?.messages?.[0]?.id) {
       await recordTemplateSent(phone, 'save_the_date_v4_img', result.messages[0].id);
       await updateGuestStage(phone, 'invitacion_enviada');
-      await sendWhatsAppMessage(from, `✅ Invitación enviada a *${guest.name}* (${phone}).\nStage: invitacion_enviada`);
-      await notifySlack(`📨 *Invitación enviada* a \`${guest.name}\` (${phone}) por comando del novio`);
+      const totalEnvio = (guest.templatesSent || []).length + 1;
+      await sendWhatsAppMessage(from, opts.force
+        ? `✅ *Reenvío* enviado a *${guest.name}* (${phone}).\n📨 Envíos totales: ${totalEnvio}`
+        : `✅ Invitación enviada a *${guest.name}* (${phone}).\nStage: invitacion_enviada`);
+      await notifySlack(opts.force
+        ? `📨 *Reenvío* a \`${guest.name}\` (${phone}) — envío #${totalEnvio}`
+        : `📨 *Invitación enviada* a \`${guest.name}\` (${phone}) por comando del novio`);
     } else {
       await sendWhatsAppMessage(from, `❌ No se pudo enviar la invitación a ${phone}. Verifica el template/estado del número.`);
     }
