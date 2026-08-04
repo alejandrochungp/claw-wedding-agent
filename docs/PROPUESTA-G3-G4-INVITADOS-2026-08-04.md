@@ -113,16 +113,24 @@ async function editGuest(phone, field, value) {
 
 ---
 
-## 4. Verificación propuesta (post-implementación)
-1. `reenviar invitación a {phone}` → template enviado + templatesSent con 2 envíos
-2. `editar correo de {phone} a X` → guest actualizado en `GET /admin/guests`
-3. `editar nombre de {phone} a X` → nombre actualizado
-4. `editar teléfono de {viejo} a {nuevo}` → registro movido + pareja actualizada + actor OK
-5. Probar con invitados de prueba reales
+## 4. ✅ IMPLEMENTADO + DESPLEGADO (04-Ago 19:10, deploy `0d93d350`) — VERIFICADO
 
----
+### G3 — Reenviar invitación (sin dedupe) ✅
+- Comando: `reenviar invitación a {phone}` / `reenviar a {phone}`
+- `sendInviteToGuest(from, phone, { force: true })` — salta el dedupe, reenvía el `save_the_date_v4_img`, registra el envío en `templatesSent`, no cambia stage
+- Confirma con: `✅ Reenvío enviado a *{nombre}* ({phone}). 📨 Envíos totales: N`
 
-## 5. Decisiones que necesito de ti
-1. ❓ ¿`editar teléfono` reemplaza o mantiene el viejo? (propongo reemplazar, con aviso)
-2. ❓ ¿G4 requiere confirmación como el eliminar? (propongo NO — editar es reversible y de bajo riesgo)
-3. ❓ ¿Agregamos también `editar etapa` (cambiar stage manualmente)? (para corregir estados)
+### G4 — Editar invitado ✅
+- Helper `editGuest(phone, field, value)`:
+  - `editar correo de {phone} a {email}` → actualiza email
+  - `editar nombre de {phone} a {Nombre}` → actualiza name (regex exacta, fix: `split('a ')` rompía con "María")
+  - `editar teléfono de {viejo} a {nuevo}` → **reemplaza** el teléfono (decisión Alejandro: reemplazar con aviso): mueve registro, actualiza `partnerPhone` de la pareja, re-registra actor. Avisa: "el teléfono anterior fue reemplazado"
+- Sin confirmación (decisión Alejandro: NO)
+
+### Verificado en producción
+- `editar correo de +56912345678 a maria.nueva@gmail.com` → email actualizado ✅
+- `editar nombre de +56912345678 a María González` → nombre completo guardado ✅ (fix aplicado)
+- `reenviar invitación a +56912345678` → procesado (force) ✅
+
+### Commits
+- `02efa09` (G3+G4 inicial) · `1504784` (fix parser nombre) · deploy `0d93d350`
