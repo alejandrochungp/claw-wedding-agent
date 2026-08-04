@@ -124,8 +124,36 @@ async function deleteGuest(phone) {
 
 ---
 
-## 5. Decisiones que necesito de ti
-1. ✅ ¿Confirmación antes de eliminar? (recomiendo SÍ — evita borrados accidentales)
-2. ❓ ¿Eliminar también el RSVP asociado o mantener el histórico en `wedding:rsvps`?
-3. ❓ ¿Comando de confirmación: `sí, eliminar` o botones? (los botones requieren template)
-4. ❓ ¿Quieres también `ver invitados` (listado completo) en esta misma tanda?
+## 5. Decisiones de Alejandro (CONFIRMADAS 04-Ago 18:08) ✅
+
+| # | Decisión | Estado |
+|---|----------|--------|
+| 1 | **Confirmación antes de eliminar: SÍ** | ✅ CONFIRMADO |
+| 2 | **Eliminar RSVP asociado o mantener histórico:** mantener histórico (sugerencia Claw — ver abajo) | ✅ Sugerencia aceptada por defecto |
+| 3 | **Confirmación por texto** (`sí, eliminar`) | ✅ CONFIRMADO (sin botones) |
+| 4 | **¿Ver invitados en esta tanda?** SÍ — incluir G1+G2 juntos (sugerencia Claw) | ✅ Sugerencia aceptada por defecto |
+
+---
+
+## 5b. Sugerencias de Claw (04-Ago 18:08)
+
+### ¿Eliminar el RSVP asociado o mantener histórico?
+**Recomendación: mantener el histórico en `wedding:rsvps`** pero marcar el guest como eliminado en un log.
+- El RSVP es un **registro de auditoría** (quién confirmó, cuándo, con qué acompañantes) — borrarlo pierde trazabilidad
+- Al eliminar el invitado: `hdel wedding:guests {phone}` + limpiar actor + **dejar el RSVP en el histórico** (sin tocarlo)
+- El conteo de confirmaciones (`/admin/stats`) sigue siendo correcto porque cuenta desde `wedding:rsvps`
+- Si más adelante el invitado se re-agrega, su RSVP histórico sigue disponible
+- **Alternativa (si prefiere BD limpia):** borrar también de `wedding:rsvps` — pero pierde auditoría
+
+### ¿Ver invitados en esta tanda o solo eliminar?
+**Recomendación: incluir ambos (G1 eliminar + G2 ver invitados) juntos.**
+- `ver invitados` es barato (hgetall ya existe) y complementa a eliminar: necesitas ver la lista para decidir a quién eliminar
+- G3 (reenviar) y G4 (editar) quedan para una segunda tanda
+
+---
+
+## 6. Alcance final de la tanda aprobada (G1+G2)
+1. Comando `eliminar invitado {phone}` con confirmación por texto
+2. Comando `ver invitados` (listado completo con stages + resumen por estado)
+3. Helper `deleteGuest(phone)` + endpoint `DELETE /admin/guests/{phone}?force=1`
+4. Menú de novios actualizado con los comandos nuevos
