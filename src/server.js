@@ -681,8 +681,10 @@ async function handleNovioCommand(from, text) {
   if (/editar nombre de/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
     const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
     const phone = normalizePhone(phoneMatch[0]);
-    const name = text.split('a ').pop().trim();
-    if (!name || name === phone) {
+    // Extraer nombre después de "a " (regex exacta, evita split por 'a ' que rompe con 'María')
+    const nameMatch = text.match(/a\s+([A-Za-zÁÉÍÓÚáéíóúÑñÜü'\s]+)$/);
+    const name = nameMatch ? nameMatch[1].trim() : null;
+    if (!name) {
       await sendWhatsAppMessage(from, `⚠️ Formato: *"editar nombre de {phone} a {Nombre}"*`);
       return;
     }
