@@ -6,6 +6,7 @@
 const express = require('express');
 const Redis = require('ioredis');
 const axios = require('axios');
+const { Pool } = require('pg');
 
 const app = express();
 app.use(express.json());
@@ -24,9 +25,16 @@ const WEDDING_SITE_URL = process.env.WEDDING_SITE_URL || 'https://boda.alejandro
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+const DATABASE_URL = process.env.DATABASE_URL || ''; // Postgres (leads + actores)
 
 const META_API = 'https://graph.facebook.com/v22.0';
 const SLACK_API = 'https://slack.com/api';
+
+// ── Postgres (Fase 7: BD de leads, separada de invitados) ───
+const pg = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 5 }) : null;
+
+// Actor registry keys (Fase 1: identificación novio > invitado > lead)
+const ACTOR_KEY = 'wedding:actors'; // phone → { role, boda_id, novios, email, createdAt }
 
 // ── Redis ────────────────────────────────────────────────────
 const redis = new Redis(REDIS_URL, {
@@ -44,10 +52,143 @@ const SLACK_TS_KEY = 'wedding:slack_ts'; // wa_msg_id → slack_ts for threading
 
 redis.on('error', (err) => console.error('Redis error:', err.message));
 
+// ── Postgres init (Fase 7: BD de leads separada de invitados) ──
+async function initPostgres() {
+  if (!pg) {
+    console.warn('⚠️ Postgres no configurado (DATABASE_URL vacío)');
+    return;
+  }
+  try {
+    await pg.query(`
+      CREATE TABLE IF NOT EXISTS leads (
+        id SERIAL PRIMARY KEY,
+        phone VARCHAR(32) UNIQUE,
+        email VARCHAR(255),
+        nombres VARCHAR(255),
+        fecha_boda DATE,
+        ciudad VARCHAR(128),
+        n_invitados INT,
+        plan_interes VARCHAR(64),
+        mensaje TEXT,
+        origen VARCHAR(32) DEFAULT 'whatsapp_bot',
+        estado VARCHAR(32) DEFAULT 'nuevo',
+        notas_marketing TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Postgres listo — tabla leads creada/verificada');
+  } catch (err) {
+    console.error('❌ Postgres init error:', err.message);
+  }
+}
+
+// ── Actor registry (Fase 1: identificación novio > invitado > lead) ──
+async function getActorRole(phone) {
+  const normalized = normalizePhone(phone);
+  // 1. Novios registrados (tenant)
+  if (TENANT.noviosPhones.includes(normalized.replace('+', ''))) return 'novio';
+  // 2. Actor registrado en Redis (explicito)
+  try {
+    const raw = await redis.hget(ACTOR_KEY, normalized);
+    if (raw) {
+      const actor = JSON.parse(raw);
+      return actor.role || 'lead';
+    }
+  } catch (e) { /* ignore */ }
+  // 3. Invitado ya confirmado (tiene RSVP)
+  try {
+    const entries = await redis.lrange(RSVP_KEY, 0, -1);
+    for (const e of entries) {
+      const r = JSON.parse(e);
+      if (r.telefono === normalized) return 'invitado';
+    }
+  } catch (e) { /* ignore */ }
+  // 4. Default: lead (nuevo cliente potencial)
+  return 'lead';
+}
+
+async function registerActor(phone, role, extra = {}) {
+  try {
+    const normalized = normalizePhone(phone);
+    await redis.hset(ACTOR_KEY, normalized, JSON.stringify({
+      role,
+      boda_id: TENANT.id,
+      createdAt: new Date().toISOString(),
+      ...extra,
+    }));
+    console.log(`👤 Actor registrado: ${normalized} → ${role}`);
+  } catch (e) { /* ignore */ }
+}
+
+// ── Leads (Fase 7) ────────────────────────────────────────────
+async function saveLead(lead) {
+  if (!pg) return null;
+  try {
+    const res = await pg.query(`
+      INSERT INTO leads (phone, email, nombres, fecha_boda, ciudad, n_invitados, plan_interes, mensaje, origen)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT (phone) DO UPDATE SET
+        email = EXCLUDED.email,
+        nombres = EXCLUDED.nombres,
+        fecha_boda = EXCLUDED.fecha_boda,
+        ciudad = EXCLUDED.ciudad,
+        n_invitados = EXCLUDED.n_invitados,
+        plan_interes = EXCLUDED.plan_interes,
+        mensaje = EXCLUDED.mensaje,
+        updated_at = NOW()
+      RETURNING id
+    `, [
+      lead.phone || null,
+      lead.email || null,
+      lead.nombres || null,
+      lead.fecha_boda || null,
+      lead.ciudad || null,
+      lead.n_invitados || null,
+      lead.plan_interes || null,
+      lead.mensaje || null,
+      lead.origen || 'whatsapp_bot',
+    ]);
+    console.log(`🆕 Lead guardado: ${lead.phone} (id ${res.rows[0]?.id})`);
+    return res.rows[0];
+  } catch (err) {
+    console.error('❌ saveLead error:', err.message);
+    return null;
+  }
+}
+
+async function listLeads() {
+  if (!pg) return [];
+  try {
+    const res = await pg.query('SELECT * FROM leads ORDER BY created_at DESC LIMIT 200');
+    return res.rows;
+  } catch (err) {
+    console.error('❌ listLeads error:', err.message);
+    return [];
+  }
+}
+
+// ── Lead commercial flow (modo lead) ─────────────────────────
+async function handleLeadMessage(from, text) {
+  console.log(`💼 LEAD [${from}]: ${text.slice(0, 100)}`);
+  await saveLead({ phone: from, mensaje: text, origen: 'whatsapp_bot' });
+
+  const lower = text.toLowerCase();
+  const reply =
+    /precio|cu[aá]nto|costo|plan|tarifa|mensual/i.test(lower)
+      ? `¡Hola! 👋 Somos *Nos Casamos* — WhatsApp automático para bodas 💍\n\nNuestros planes:\n• *Esencial* — $49.990 setup + $19.990/mes\n• *Completo* (el más elegido) — $79.990 setup + $29.990/mes\n• *Premium* — $119.990 setup + $39.990/mes\n\nTodo incluye Save the Date, RSVP con botones, recordatorios y micrositio nupcial. ¿Te cuento más en detalle?`
+      : `¡Hola! 👋 Somos *Nos Casamos* — el bot de WhatsApp que organiza bodas 💍\n\nInvitados confirman con un toque, reciben recordatorios y dudas respondidas al instante. Tú ves todo en tiempo real.\n\nPara darte una cotización cuéntame: 📅 fecha de la boda, 📍 ciudad y 👥 nº de invitados. O escríbenos a nuestro WhatsApp comercial.`;
+
+  await sendWhatsAppMessage(from, reply);
+  await notifySlack(`💼 *LEAD NUEVO* \`${from}\`: "${text.slice(0, 120)}"`);
+}
+
 // ── Tenant Config ─────────────────────────────────────────────
 const TENANT = {
   id: 'boda-alejandro-kuilen',
   novios: { nombre1: 'Alejandro', nombre2: 'Kuilen' },
+  // WhatsApp de los novios (identificables por el bot — Fase 1)
+  noviosPhones: ['56966283141'], // Alejandro (+56 9 6628 3141) — Kuilen pendiente de agregar
   fecha: '2026-11-17',
   hora: '18:00',
   horaNota: 'Sujeto a modificaciones. Por confirmar',
@@ -75,16 +216,21 @@ app.get('/status', async (_req, res) => {
   try {
     rsvpCount = await redis.llen(RSVP_KEY);
   } catch (e) { /* redis might not be connected yet */ }
+  let pgOk = false;
+  if (pg) {
+    try { await pg.query('SELECT 1'); pgOk = true; } catch (e) { /* not ready */ }
+  }
   res.json({
     status: 'ok',
     name: 'claw-wedding-agent',
-    version: '1.6.0',
+    version: '1.7.0',
     uptime: Math.floor(process.uptime()),
     node: process.version,
     tenant: TENANT.id,
     whatsapp: !!WHATSAPP_TOKEN,
     slack: !!SLACK_BOT_TOKEN,
     redis: redis.status === 'ready',
+    postgres: pgOk,
     rsvps: rsvpCount,
     phoneNumberId: PHONE_NUMBER_ID ? '***configured***' : 'missing',
     metaApp: META_APP_ID ? `${META_APP_ID.slice(0, 8)}...` : 'missing',
@@ -305,14 +451,27 @@ async function handleIncomingMessage(msg, fromPhone) {
 
   console.log(`💬 ${from}: ${text}` + (interactiveId ? ` [btn:${interactiveId}]` : ''));
 
-  // Handle interactive button replies
+  // ── Fase 1: identificar actor (novio > invitado > lead) ──
+  const role = await getActorRole(from);
+  console.log(`🎭 Rol detectado para ${from}: ${role}`);
+
+  // Botones SIEMPRE son RSVP (vienen de templates oficiales de la boda)
   if (interactiveType === 'button') {
     await handleButtonReply(from, interactiveId, text);
   } else if (msgType === 'text') {
-    // Try to detect RSVP intent in free text
-    await handleTextRSVP(from, text);
-    // Auto-reply for common keywords
-    await sendAutoReply(from, text);
+    if (role === 'novio') {
+      // Novio: comandos de gestión (Fase 2: agregar invitados, etc.)
+      await handleNovioCommand(from, text);
+    } else if (role === 'lead' && /precio|cu[aá]nto|costo|plan|tarifa|mensual|cotiz|quiero esto|contratar|producto|nos casamos/i.test(text)) {
+      // Lead con intención comercial explícita → flujo comercial (Fase 7)
+      await handleLeadMessage(from, text);
+    } else {
+      // Invitado (o lead sin intención comercial → tratar como invitado)
+      await handleTextRSVP(from, text);
+      await sendAutoReply(from, text);
+      // Si era lead, registrarlo como invitado tras interactuar con la boda
+      if (role === 'lead') await registerActor(from, 'invitado', { via: 'texto_boda' });
+    }
   }
 
   // Forward to Slack with thread linking
@@ -328,6 +487,68 @@ async function handleIncomingMessage(msg, fromPhone) {
     }));
     await redis.expire(CONVERSATION_KEY, 86400 * 30);
   } catch (e) { /* ignore */ }
+}
+
+// ── Novio Commands (Fase 2) ──────────────────────────────────
+async function handleNovioCommand(from, text) {
+  const lower = text.trim().toLowerCase();
+  console.log(`🎛️ Comando novio [${from}]: ${text.slice(0, 100)}`);
+
+  if (/agregar invitado|a[nñ]ade? a|agrega a|nuevo invitado/i.test(lower)) {
+    // Fase 2: parser LLM extrae nombre + WhatsApp (+ correo opcional)
+    await addGuestViaChat(from, text);
+    return;
+  }
+
+  if (/ver (los |las )?(confirmaciones|invitados)|cu[aá]ntos confirm|estado/i.test(lower)) {
+    try {
+      const entries = await redis.lrange(RSVP_KEY, 0, -1);
+      const rsvps = entries.map(e => JSON.parse(e));
+      const confirmed = rsvps.filter(r => r.rsvp.includes('Confirmado')).length;
+      const declined = rsvps.filter(r => r.rsvp.includes('No asistir')).length;
+      await sendWhatsAppMessage(from, `📊 *Estado de confirmaciones:*\n✅ Confirmados: ${confirmed}\n❌ No asistirán: ${declined}\n⏳ Sin respuesta: ${Math.max(0, 0)}\n\n(Total registrados: ${rsvps.length})`);
+    } catch (e) {
+      await sendWhatsAppMessage(from, '⚠️ No pude consultar las confirmaciones ahora.');
+    }
+    return;
+  }
+
+  // Comando no reconocido — menú rápido
+  await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar invitado"* — añadir invitado (nombre + WhatsApp + correo opcional)\n📊 *"ver confirmaciones"* — estado actual de los RSVP\n\n¿Qué necesitas?`);
+}
+
+// ── Fase 2: agregar invitado conversacional ──────────────────
+async function addGuestViaChat(from, text) {
+  // Parsear: "agrega a María Pérez +56 9 1234 5678 maria@gmail.com"
+  // Patrón: nombre (texto) + teléfono (56 9 XXXX XXXX) + correo opcional
+  const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  if (!phoneMatch) {
+    await sendWhatsAppMessage(from, `⚠️ No encontré el WhatsApp del invitado. Formato:\n\n➡️ *"agregar a María Pérez +56 9 1234 5678"*\n\n(correo opcional: ... maria@gmail.com)`);
+    return;
+  }
+
+  const phone = normalizePhone(phoneMatch[0]);
+  const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
+  const email = emailMatch ? emailMatch[0] : null;
+
+  // Nombre = texto entre "agregar a" y el teléfono (o correo)
+  let namePart = text.replace(phoneMatch[0], '').replace(/\s*\S+@\S+\s*/, ' ').trim();
+  namePart = namePart.replace(/^(agregar|agrega|a[nñ]ade|a|nuevo invitado)\s+/i, '').trim();
+  namePart = namePart.replace(/^(a|al|la|el)\s+/i, '').trim();
+  const name = namePart || phone;
+
+  // Guardar invitado en Redis (lista de invitados de la boda)
+  try {
+    const guestKey = 'wedding:guests';
+    await redis.rpush(guestKey, JSON.stringify({ name, phone, email, addedBy: from, createdAt: new Date().toISOString() }));
+    // Registrar actor como invitado
+    await registerActor(phone, 'invitado', { name, email });
+    await notifySlack(`➕ *Invitado agregado por novio* \`${from}\`:\n👤 ${name}\n📱 ${phone}${email ? `\n📧 ${email}` : ''}`);
+    await sendWhatsAppMessage(from, `✅ Agregué a *${name}* (${phone})${email ? `, correo ${email}` : ''} a los invitados.\n\n¿Quieres agregar a alguien más?`);
+  } catch (e) {
+    console.error('❌ addGuestViaChat error:', e.message);
+    await sendWhatsAppMessage(from, '⚠️ No pude guardar el invitado. Inténtalo de nuevo.');
+  }
 }
 
 // ── DeepSeek-based RSVP Classification ───────────────────────
@@ -874,6 +1095,47 @@ app.get('/admin/conversations', async (_req, res) => {
   }
 });
 
+// ── Fase 7: LEAD endpoints ───────────────────────────────────
+// POST /api/lead — form del sitio producto (noscasamos.vip/contacto)
+app.post('/api/lead', async (req, res) => {
+  const b = req.body || {};
+  const lead = {
+    phone: b.phone || null,
+    email: b.email || null,
+    nombres: b.nombres || b.name || null,
+    fecha_boda: b.fecha_boda || b.fecha || null,
+    ciudad: b.ciudad || null,
+    n_invitados: b.n_invitados || b.invitados || null,
+    plan_interes: b.plan_interes || b.plan || null,
+    mensaje: b.mensaje || b.msg || null,
+    origen: b.origen || 'form_sitio',
+  };
+  if (!lead.phone && !lead.email && !lead.nombres) {
+    return res.status(400).json({ error: 'Se requiere al menos phone, email o nombres' });
+  }
+  const saved = await saveLead(lead);
+  if (!saved) return res.status(500).json({ error: 'No se pudo guardar (¿Postgres configurado?)' });
+  await notifySlack(`💼 *LEAD FORM SITIO*: ${lead.nombres || '?'}${lead.phone ? ` · ${lead.phone}` : ''}${lead.email ? ` · ${lead.email}` : ''}${lead.fecha_boda ? ` · ${lead.fecha_boda}` : ''}${lead.plan_interes ? ` · Plan ${lead.plan_interes}` : ''}`);
+  res.json({ ok: true, id: saved.id });
+});
+
+// GET /admin/leads — listar leads (seguimiento marketing)
+app.get('/admin/leads', async (_req, res) => {
+  const leads = await listLeads();
+  res.json({ total: leads.length, leads });
+});
+
+// GET /admin/guests — lista de invitados agregados por novios
+app.get('/admin/guests', async (_req, res) => {
+  try {
+    const entries = await redis.lrange('wedding:guests', 0, -1);
+    const guests = entries.map(e => JSON.parse(e));
+    res.json({ total: guests.length, guests });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ───────────────────────────────────────────────────
 async function start() {
   try {
@@ -883,8 +1145,10 @@ async function start() {
     console.warn('⚠️ Redis not available, starting without it');
   }
 
+  await initPostgres();
+
   app.listen(PORT, () => {
-    console.log(`💒 claw-wedding-agent v1.5.0 running on port ${PORT}`);
+    console.log(`💒 claw-wedding-agent v1.7.0 running on port ${PORT}`);
     console.log(`   Tenant:          ${TENANT.id}`);
     console.log(`   Health:          http://localhost:${PORT}/status`);
     console.log(`   Webhook WA:      http://localhost:${PORT}/webhook`);
@@ -894,6 +1158,8 @@ async function start() {
     console.log(`   Slack Events:    ${SLACK_SIGNING_SECRET ? '✅ configured' : '⚠️ not configured (needed for Slack→WA)'}`);
     console.log(`   DeepSeek LLM:   ${DEEPSEEK_API_KEY ? `✅ ${DEEPSEEK_MODEL}` : '⚠️ heuristic fallback'}`);
     console.log(`   Redis:           ${redis.status === 'ready' ? '✅ connected' : '❌ not connected'}`);
+    console.log(`   Postgres:        ${pg ? '✅ connected (leads)' : '❌ DATABASE_URL missing'}`);
+    console.log(`   Novios:          ${TENANT.noviosPhones.join(', ')}`);
     console.log(`   Simulator:       http://localhost:${PORT}/admin/simulate-webhook`);
   });
 }
