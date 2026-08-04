@@ -582,9 +582,38 @@ async function handleNovioCommand(from, text) {
       const rsvps = entries.map(e => JSON.parse(e));
       const confirmed = rsvps.filter(r => r.rsvp.includes('Confirmado')).length;
       const declined = rsvps.filter(r => r.rsvp.includes('No asistir')).length;
-      await sendWhatsAppMessage(from, `📊 *Estado de confirmaciones:*\n✅ Confirmados: ${confirmed}\n❌ No asistirán: ${declined}\n⏳ Sin respuesta: ${Math.max(0, 0)}\n\n(Total registrados: ${rsvps.length})`);
+      await sendWhatsAppMessage(from, `📊 *Estado de confirmaciones:*\n✅ Confirmados: ${confirmed}\n❌ No asistirán: ${declined}\n⏳ Sin respuesta: ${Math.max(0, 0)}\n\n(Total registrados: ${rsvps.length})\n\n📋 ¿Quieres ver *los nombres* de los confirmados?\n➡️ Responde: *"ver nombres"*`);
     } catch (e) {
       await sendWhatsAppMessage(from, '⚠️ No pude consultar las confirmaciones ahora.');
+    }
+    return;
+  }
+
+  // Segunda opción: listar los NOMBRES de los confirmados (y no-asistentes)
+  if (/ver nombres|nombres de los confirmados|qui[eé]nes (son|van|confirman)|listado/i.test(lower)) {
+    try {
+      const entries = await redis.lrange(RSVP_KEY, 0, -1);
+      const rsvps = entries.map(e => JSON.parse(e));
+
+      const confirmed = rsvps.filter(r => r.rsvp.includes('Confirmado'));
+      const declined = rsvps.filter(r => r.rsvp.includes('No asistir'));
+      const maybe = rsvps.filter(r => r.rsvp.includes('Tal vez'));
+
+      const fmt = (r) => {
+        const nombre = r.nombre && r.nombre !== 'null' ? r.nombre : r.telefono;
+        const acomp = r.acompanantes && r.acompanantes !== '0' ? ` (+${r.acompanantes})` : '';
+        return `• ${nombre}${acomp}`;
+      };
+
+      let msg = `📋 *Listado de confirmaciones:*\n\n`;
+      msg += `✅ *Confirmados (${confirmed.length}):*\n${confirmed.length ? confirmed.map(fmt).join('\n') : '—'}\n\n`;
+      if (maybe.length) msg += `🤔 *Tal vez (${maybe.length}):*\n${maybe.map(fmt).join('\n')}\n\n`;
+      msg += `❌ *No asistirán (${declined.length}):*\n${declined.length ? declined.map(fmt).join('\n') : '—'}`;
+
+      await sendWhatsAppMessage(from, msg);
+    } catch (e) {
+      console.error('❌ ver nombres error:', e.message);
+      await sendWhatsAppMessage(from, '⚠️ No pude obtener el listado ahora.');
     }
     return;
   }
