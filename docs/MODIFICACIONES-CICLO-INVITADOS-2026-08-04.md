@@ -21,6 +21,44 @@
 
 ## 📋 Fase 1 — Implementar (tras aprobación)
 
+### ✅ IMPLEMENTADA + DESPLEGADA (04-Ago 17:30, deploy `54885d56`) — VERIFICADA
+
+### 1.1 Cambiar estructura de `wedding:guests` (lista → hash)
+**Actual (implementado):**
+```js
+// addGuestViaChat
+const guestKey = 'wedding:guests';
+const guest = { name, phone, email, addedBy, createdAt, stage: 'nuevo', stageUpdatedAt, templatesSent: [] };
+await redis.hset(guestKey, phone, JSON.stringify(guest));
+```
+- ✅ Hash por phone (hset/hgetall)
+- ✅ Migración automática lista→hash en `start()` (`migrateGuestsToListHash`) — fix WRONGTYPE para invitados viejos
+
+### 1.2 Comando: `enviar invitación a {phone}` ✅
+- Envía `save_the_date_v4_img` con **header IMAGE** (upload fresh vía `uploadImageToMeta()` desde el micrositio) + 3 variables body (día/mes/año)
+- → stage `invitacion_enviada` + push a `templatesSent`
+- Dedupe: avisa si ya se le envió
+- ⚠️ Fix: el template v4_img REQUIERE header image — el `sendTemplate()` genérico no sirve (solo body)
+- ⚠️ Fix: `WEDDING_SITE_URL` fallback apuntaba a `boda.alejandro-y-kuilen.cl` (no existe, ENOTFOUND) → corregido a `alejandro-kuilen.noscasamos.vip`
+
+### 1.3 Comando: `enviar invitación a todos` ✅
+- Batch a stage `nuevo`, sube la foto UNA vez, rate limit 300ms, reporte enviadas/fallidas
+
+### 1.4 Actualizar stage al confirmar RSVP ✅
+- `handleButtonReply` / `handleRsvpFormMessage` / `handleTextRSVP` → `updateGuestStage(phone, 'confirmado'|'no_asistira'|'tal_vez')`
+
+### 1.5 Helper `updateGuestStage(phone, stage)` ✅
+
+### 1.6 Endpoints admin ✅
+- `GET /admin/guests` → hgetall con stage
+- `GET /admin/guest-states` → NUEVO: resumen por stage + lista
+
+### Verificación (04-Ago 17:30)
+- Migración lista→hash: María Pérez → `stage: nuevo` ✅
+- Agregar invitado (Juan Soto): `stage: nuevo` ✅
+- `enviar invitación a +56999887766`: → `stage: invitacion_enviada`, `templatesSent: [save_the_date_v4_img]` ✅
+- Commits: `c0a3698`, `393d1b4`, `7c53d86`, `15dab81`
+
 ### 1.1 Cambiar estructura de `wedding:guests` (lista → hash)
 **Actual:**
 ```js
