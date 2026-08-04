@@ -156,10 +156,33 @@ Pronto te llegará la invitación formal. ¡Nos vemos! ✨
 
 ---
 
-## 8. Decisiones pendientes de Alejandro (para aprobar la v2)
+## 8. Decisiones de Alejandro (CONFIRMADAS 04-Ago 16:26) ✅
 
-1. ✅ Template de invitación inicial: `save_the_date_v4_img` (aprobado) — confirmar
-2. ✅ Nombre del template formal: `invitacion_formal` vs `carta_invitacion`
-3. ✅ Días de recordatorios: ¿T-30 / T-7 / T-24h está bien? ¿Agregar T-14?
-4. ✅ ¿Código de novios real para la carta? (ALEJKUIL es placeholder — confirmar slug de codigonovios)
-5. ✅ ¿El campo `stage` va también a Postgres o solo Redis?
+| # | Decisión | Estado |
+|---|----------|--------|
+| 1 | Nombre template formal: **`invitacion_formal`** | ✅ CONFIRMADO |
+| 2 | Recordatorios **T-30 / T-7 / T-24h** | ✅ CONFIRMADO (sin T-14) |
+| 3 | Código de novios en la carta | ⏳ **PENDIENTE** — usar placeholder `ALEJKUIL` hasta definir el slug real de codigonovios |
+| 4 | Storage del `stage` | ⏳ Ver sugerencia abajo (Claw propone, Alejandro confirma) |
+
+---
+
+## 8b. Sugerencia de storage para `stage` (Claw — 04-Ago 16:26)
+
+### Opción A: Redis como fuente operativa (RECOMENDADA para F1)
+- **Dónde:** cada guest en `wedding:guests` pasa de lista-plana (`rpush` de JSON) a **hash** (`hset wedding:guests {phone} → JSON`) para poder actualizar el `stage` sin reescribir la lista completa
+- **Estructura por guest:** `{ name, phone, email, addedBy, createdAt, stage, stageUpdatedAt, templatesSent: [] }`
+- **Por qué:** el bot ya lee/escribe guests en Redis en cada mensaje (rápido, sin latencia), y el stage es un campo más del registro
+- **Ventaja:** cero dependencias nuevas, consistente con el stack actual
+
+### Opción B: Postgres como fuente de verdad
+- Tabla `guests` nueva en Postgres con `stage` + historial
+- **Ventaja:** reportes/marketing SQL directo, persistencia fuerte
+- **Desventaja:** el bot consultaría Postgres en cada mensaje (más latencia) + migración de guests existentes
+
+### Opción C (HÍBRIDA — recomendada para producción): Redis operativo + espejo Postgres
+1. El bot escribe/lee `stage` en **Redis** (rápido, operativo)
+2. Sincronización a **Postgres** (tabla `guests`) para reportes, panel y marketing futuro
+3. Misma lógica que ya tenemos con `leads` (Postgres para marketing)
+
+**Mi recomendación:** **C** como meta, pero implementar **A en F1** (rápido, sin riesgo) y agregar el espejo Postgres en F4 (reportes). Así no bloqueamos el envío de templates por infraestructura.
