@@ -571,13 +571,82 @@ async function handleRsvpFormMessage(from, text) {
   await sendWhatsAppMessage(from, reply);
 }
 
-// ── Novio Commands (Fase 2) ──────────────────────────────────
+// ── Novio Commands (Fase 2 + G1/G2 + Parejas) ────────────────
 async function handleNovioCommand(from, text) {
   const lower = text.trim().toLowerCase();
   console.log(`🎛️ Comando novio [${from}]: ${text.slice(0, 100)}`);
 
+  // G1: confirmación de eliminación pendiente ("sí, eliminar" / "confirmar")
+  if (/s[ií],\s*eliminar|confirmar eliminaci[oó]n|s[ií]\s*eliminar/i.test(lower)) {
+    try {
+      const pending = await redis.get(`wedding:pend_delete:${from}`);
+      if (pending) {
+        await redis.del(`wedding:pend_delete:${from}`);
+        const guest = await deleteGuest(pending);
+        await sendWhatsAppMessage(from, `✅ *${guest?.name || pending}* (${pending}) eliminado de los invitados${guest?.stage ? ` (stage: ${guest.stage})` : ''} — incluido su RSVP.`);
+        await notifySlack(`🗑️ *Invitado eliminado* por novio \`${from}\`: ${guest?.name || pending} (${pending}) — Opción B (RSVP borrado)`);
+      } else {
+        await sendWhatsAppMessage(from, 'ℹ️ No hay ninguna eliminación pendiente.');
+      }
+    } catch (e) {
+      console.error('❌ confirmar eliminación error:', e.message);
+      await sendWhatsAppMessage(from, '⚠️ Error al eliminar. Inténtalo de nuevo.');
+    }
+    return;
+  }
+
+  // G1: eliminar invitado (con confirmación)
+  if (/eliminar invitado|quitar a|borrar invitado/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
+    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+    const phone = normalizePhone(phoneMatch[0]);
+    const guest = await getGuest(phone);
+    if (!guest) {
+      await sendWhatsAppMessage(from, `⚠️ *${phone}* no está en la lista de invitados.`);
+      return;
+    }
+    await redis.set(`wedding:pend_delete:${from}`, phone, 'EX', 120); // TTL 2 min
+    await sendWhatsAppMessage(from, `⚠️ ¿Eliminar a *${guest.name}* (${phone})?\n\nStage: ${guest.stage}\n📨 Templates enviados: ${(guest.templatesSent || []).length}\n\n➡️ Escribe *"sí, eliminar"* para confirmar (se borrará también su RSVP).`);
+    return;
+  }
+
+  // G2: ver invitados (listado completo con stages)
+  if (/ver invitados|lista invitados|listado de invitados/i.test(lower)) {
+    try {
+      const all = await redis.hgetall('wedding:guests');
+      const guests = Object.entries(all).map(([phone, raw]) => ({ phone, ...JSON.parse(raw) }));
+      const stages = {};
+      for (const g of guests) stages[g.stage || 'sin_stage'] = (stages[g.stage || 'sin_stage'] || 0) + 1;
+      let msg = `📋 *Invitados (${guests.length}):*\n`;
+      msg += `🆕 nuevo: ${stages.nuevo || 0} · 📨 invitación: ${stages.invitacion_enviada || 0} · ✅ confirmados: ${stages.confirmado || 0} · ❌ no: ${stages.no_asistira || 0} · 🤔 talvez: ${stages.tal_vez || 0}\n\n`;
+      const emoji = { nuevo: '🆕', invitacion_enviada: '📨', confirmado: '✅', no_asistira: '❌', tal_vez: '🤔' };
+      for (const g of guests.slice(0, 20)) {
+        msg += `${emoji[g.stage] || '❔'} ${g.name} — ${g.phone}${g.coupleId ? ' 👫' : ''}\n`;
+      }
+      if (guests.length > 20) msg += `\n... y ${guests.length - 20} más`;
+      await sendWhatsAppMessage(from, msg);
+    } catch (e) {
+      console.error('❌ ver invitados error:', e.message);
+      await sendWhatsAppMessage(from, '⚠️ No pude listar los invitados.');
+    }
+    return;
+  }
+
+  // Parejas: vincular 2 invitados existentes
+  if (/vincular pareja|vincular a|unir pareja/i.test(lower) && (text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || []).length >= 2) {
+    const phones = (text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || []).map(p => normalizePhone(p));
+    const res = await linkCouple(phones[0], phones[1]);
+    if (res.ok) {
+      await sendWhatsAppMessage(from, `👫 *Pareja vinculada:*\n• ${res.g1.name} (${phones[0]})\n• ${res.g2.name} (${phones[1]})\n🔗 ${res.coupleId}\n\nEl +1 mutuo se contará una sola vez.`);
+      await notifySlack(`👫 *Pareja vinculada* por novio: ${res.g1.name} ↔ ${res.g2.name}`);
+    } else {
+      const missing = res.reason === 'ambos' ? 'ninguno de los dos' : res.reason;
+      await sendWhatsAppMessage(from, `⚠️ No pude vincular: ${missing} no está en la lista de invitados.`);
+    }
+    return;
+  }
+
   if (/agregar|a[nñ]ade?|agrega|nuevo invitado|invitado/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
-    // Fase 2: parser extrae nombre + WhatsApp (+ correo opcional)
+    // Fase 2: parser extrae nombre + WhatsApp (+ correo opcional) — soporta parejas
     await addGuestViaChat(from, text);
     return;
   }
@@ -597,11 +666,8 @@ async function handleNovioCommand(from, text) {
 
   if (/ver (los |las )?(confirmaciones|invitados)|cu[aá]ntos confirm|estado/i.test(lower)) {
     try {
-      const entries = await redis.lrange(RSVP_KEY, 0, -1);
-      const rsvps = entries.map(e => JSON.parse(e));
-      const confirmed = rsvps.filter(r => r.rsvp.includes('Confirmado')).length;
-      const declined = rsvps.filter(r => r.rsvp.includes('No asistir')).length;
-      await sendWhatsAppMessage(from, `📊 *Estado de confirmaciones:*\n✅ Confirmados: ${confirmed}\n❌ No asistirán: ${declined}\n⏳ Sin respuesta: ${Math.max(0, 0)}\n\n(Total registrados: ${rsvps.length})\n\n📋 ¿Quieres ver *los nombres* de los confirmados?\n➡️ Responde: *"ver nombres"*`);
+      const s = await getConfirmedStats(); // con absorción de parejas 👫
+      await sendWhatsAppMessage(from, `📊 *Estado de confirmaciones:*\n✅ Confirmados: ${s.confirmed}\n❌ No asistirán: ${s.declined}\n🤔 Tal vez: ${s.maybe}\n👥 Asistentes estimados: ${s.totalAsistentes}\n\n(Total registrados: ${s.totalRegistrados})\n\n📋 ¿Quieres ver *los nombres* de los confirmados?\n➡️ Responde: *"ver nombres"*`);
     } catch (e) {
       await sendWhatsAppMessage(from, '⚠️ No pude consultar las confirmaciones ahora.');
     }
@@ -638,26 +704,56 @@ async function handleNovioCommand(from, text) {
   }
 
   // Comando no reconocido — menú rápido
-  await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar invitado"* — añadir invitado (nombre + WhatsApp + correo opcional)\n📊 *"ver confirmaciones"* — estado actual de los RSVP\n\n¿Qué necesitas?`);
+  await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar a {nombre} +56 9..."* — añadir invitado (o pareja: *"agregar a A +56 9... y B +56 9..."*)\n📨 *"enviar invitación a {phone}"* — enviar save-the-date a uno\n📨 *"enviar invitación a todos"* — batch a pendientes\n📋 *"ver invitados"* — listado con stages\n📊 *"ver confirmaciones"* — estado RSVP\n👫 *"vincular pareja {p1} {p2}"* — vincular 2 invitados (fix +1)\n🗑️ *"eliminar invitado {phone}"* — eliminar (con confirmación)\n\n¿Qué necesitas?`);
 }
 
-// ── Fase 2: agregar invitado conversacional ──────────────────
+// ── Fase 2: agregar invitado conversacional (soporta PAREJAS 👫) ──
 async function addGuestViaChat(from, text) {
   // Parsear: "agrega a María Pérez +56 9 1234 5678 maria@gmail.com"
-  // Patrón: nombre (texto) + teléfono (56 9 XXXX XXXX) + correo opcional
-  const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
-  if (!phoneMatch) {
-    await sendWhatsAppMessage(from, `⚠️ No encontré el WhatsApp del invitado. Formato:\n\n➡️ *"agregar a María Pérez +56 9 1234 5678"*\n\n(correo opcional: ... maria@gmail.com)`);
+  // Pareja: "agrega a María Pérez +56 9 1111 2222 y Juan Soto +56 9 3333 4444"
+  const phonesRaw = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || [];
+  if (!phonesRaw.length) {
+    await sendWhatsAppMessage(from, `⚠️ No encontré el WhatsApp del invitado. Formato:\n\n➡️ *"agregar a María Pérez +56 9 1234 5678"*\n\nPareja: *"agregar a María +56 9... y Juan +56 9..."* (correo opcional)`);
     return;
   }
 
-  const phone = normalizePhone(phoneMatch[0]);
   const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
   const email = emailMatch ? emailMatch[0] : null;
 
+  const isCouple = phonesRaw.length >= 2;
+  if (isCouple) {
+    // ── PAREJA: crear 2 invitados vinculados (coupleId + partnerPhone) ──
+    const phone1 = normalizePhone(phonesRaw[0]);
+    const phone2 = normalizePhone(phonesRaw[1]);
+    const coupleId = 'CP-' + Math.random().toString(16).slice(2, 8).toUpperCase();
+
+    // Dividir el texto en las dos mitades usando los teléfonos como ancla
+    const idx1 = text.indexOf(phonesRaw[0]);
+    const idx2 = text.indexOf(phonesRaw[1]);
+    let name1 = text.slice(0, idx1).replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '').trim();
+    let name2 = text.slice(idx1 + phonesRaw[0].length, idx2).replace(/\s+y\s+/i, ' ').trim();
+    name1 = name1.replace(/^(agregar|agrega|a[nñ]ade|a|nuevo invitado|invitado)\s+/i, '').replace(/^(a|al|la|el)\s+/i, '').trim();
+    name2 = name2.replace(/^(y|a|al|la|el)\s+/i, '').replace(/^(a|al|la|el)\s+/i, '').trim();
+    const finalName1 = name1 || phone1;
+    const finalName2 = name2 || phone2;
+
+    const g1 = { name: finalName1, phone: phone1, email: null, addedBy: from, createdAt: new Date().toISOString(), stage: 'nuevo', stageUpdatedAt: new Date().toISOString(), templatesSent: [], coupleId, partnerPhone: phone2 };
+    const g2 = { name: finalName2, phone: phone2, email: null, addedBy: from, createdAt: new Date().toISOString(), stage: 'nuevo', stageUpdatedAt: new Date().toISOString(), templatesSent: [], coupleId, partnerPhone: phone1 };
+    await redis.hset('wedding:guests', phone1, JSON.stringify(g1));
+    await redis.hset('wedding:guests', phone2, JSON.stringify(g2));
+    await registerActor(phone1, 'invitado', { name: finalName1 });
+    await registerActor(phone2, 'invitado', { name: finalName2 });
+    await notifySlack(`👫 *Pareja agregada por novio* \`${from}\`:\n👤 ${finalName1} (${phone1})\n👤 ${finalName2} (${phone2})\n🔗 ${coupleId}`);
+    await sendWhatsAppMessage(from, `✅ Agregué a la *pareja* 👫\n👤 ${finalName1} (${phone1})\n👤 ${finalName2} (${phone2})\n\nCada uno recibirá su invitación personalizada y el +1 mutuo se contará una sola vez.\n➡️ Envía invitación: *"enviar invitación a todos"*`);
+    return;
+  }
+
+  // ── INVITADO INDIVIDUAL ──
+  const phone = normalizePhone(phonesRaw[0]);
+
   // Nombre = texto entre "agregar a" y el teléfono (o correo)
-  let namePart = text.replace(phoneMatch[0], '').replace(/\s*\S+@\S+\s*/, ' ').trim();
-  namePart = namePart.replace(/^(agregar|agrega|a[nñ]ade|a|nuevo invitado)\s+/i, '').trim();
+  let namePart = text.replace(phonesRaw[0], '').replace(/\s*\S+@\S+\s*/, ' ').trim();
+  namePart = namePart.replace(/^(agregar|agrega|a[nñ]ade|a|nuevo invitado|invitado)\s+/i, '').trim();
   namePart = namePart.replace(/^(a|al|la|el)\s+/i, '').trim();
   const name = namePart || phone;
 
@@ -705,6 +801,75 @@ async function recordTemplateSent(phone, templateName, wamid) {
   guest.templatesSent = guest.templatesSent || [];
   guest.templatesSent.push({ name: templateName, ts: new Date().toISOString(), wamid: wamid || null });
   await redis.hset('wedding:guests', phone, JSON.stringify(guest));
+}
+
+// ── G1: eliminar invitado (Opción B: borra también su RSVP) ──
+async function deleteGuest(phone) {
+  const guest = await getGuest(phone);
+  // 1. Borrar del hash de guests
+  await redis.hdel('wedding:guests', phone);
+  // 2. Borrar actor (si existe)
+  try { await redis.hdel(ACTOR_KEY, phone); } catch (e) { /* ignore */ }
+  // 3. Opción B: borrar RSVP asociado de la lista wedding:rsvps
+  try {
+    const entries = await redis.lrange(RSVP_KEY, 0, -1);
+    const remaining = entries.filter(raw => {
+      try { return JSON.parse(raw).telefono !== phone; } catch (e) { return true; }
+    });
+    if (remaining.length !== entries.length) {
+      await redis.del(RSVP_KEY);
+      if (remaining.length) await redis.rpush(RSVP_KEY, ...remaining);
+    }
+  } catch (e) { /* ignore */ }
+  console.log(`🗑️ Invitado eliminado (Opción B): ${phone}`);
+  return guest;
+}
+
+// ── Parejas 👫: vincular 2 invitados existentes ──
+async function linkCouple(phone1, phone2) {
+  const g1 = await getGuest(phone1);
+  const g2 = await getGuest(phone2);
+  if (!g1 || !g2) return { ok: false, reason: !g1 && !g2 ? 'ambos' : (!g1 ? phone1 : phone2) };
+  const coupleId = 'CP-' + Math.random().toString(16).slice(2, 8).toUpperCase();
+  g1.coupleId = coupleId; g1.partnerPhone = phone2;
+  g2.coupleId = coupleId; g2.partnerPhone = phone1;
+  await redis.hset('wedding:guests', phone1, JSON.stringify(g1));
+  await redis.hset('wedding:guests', phone2, JSON.stringify(g2));
+  return { ok: true, coupleId, g1, g2 };
+}
+
+// ── Stats con absorción de parejas (fix +1 duplicado) ──
+async function getConfirmedStats() {
+  const entries = await redis.lrange(RSVP_KEY, 0, -1);
+  const rsvps = entries.map(e => JSON.parse(e));
+  const guestsAll = await redis.hgetall('wedding:guests');
+  const guestMap = {};
+  for (const [p, raw] of Object.entries(guestsAll || {})) {
+    try { guestMap[p] = JSON.parse(raw); } catch (e) { /* ignore */ }
+  }
+
+  let confirmed = 0, declined = 0, maybe = 0, totalAsistentes = 0;
+  const confirmedPhones = new Set(rsvps.filter(r => r.rsvp.includes('Confirmado')).map(r => r.telefono));
+
+  for (const r of rsvps) {
+    if (r.rsvp.includes('Confirmado')) {
+      confirmed++;
+      totalAsistentes++; // el invitado mismo
+      const acomp = parseInt(r.acompanantes || '0', 10) || 0;
+      let extra = acomp;
+      const guest = guestMap[r.telefono];
+      // Si tiene pareja vinculada y la pareja TAMBIÉN confirmó → el +1 mutuo se absorbe
+      if (guest && guest.coupleId && guest.partnerPhone && confirmedPhones.has(guest.partnerPhone)) {
+        extra = Math.max(0, acomp - 1);
+      }
+      totalAsistentes += extra;
+    } else if (r.rsvp.includes('No asistir')) {
+      declined++;
+    } else if (r.rsvp.includes('Tal vez')) {
+      maybe++;
+    }
+  }
+  return { confirmed, declined, maybe, totalAsistentes, totalRegistrados: rsvps.length };
 }
 
 // F1: migrar wedding:guests de LISTA (estructura vieja) a HASH (nueva)
@@ -1379,12 +1544,21 @@ app.get('/admin/rsvps', async (_req, res) => {
 // Stats: confirmed vs declined
 app.get('/admin/stats', async (_req, res) => {
   try {
-    const entries = await redis.lrange(RSVP_KEY, 0, -1);
-    const rsvps = entries.map(e => JSON.parse(e));
-    const confirmed = rsvps.filter(r => r.rsvp.includes('Confirmado')).length;
-    const declined = rsvps.filter(r => r.rsvp.includes('No asistir')).length;
-    const total = rsvps.length;
-    res.json({ total, confirmed, declined, pending: total - confirmed - declined });
+    const s = await getConfirmedStats(); // con absorción de parejas 👫
+    res.json({ total: s.totalRegistrados, confirmed: s.confirmed, declined: s.declined, maybe: s.maybe, totalAsistentes: s.totalAsistentes, pending: s.totalRegistrados - s.confirmed - s.declined - s.maybe });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// G1: DELETE /admin/guests/{phone} — eliminar invitado (Opción B: también su RSVP)
+app.delete('/admin/guests/:phone', async (req, res) => {
+  try {
+    const phone = normalizePhone(req.params.phone);
+    const guest = await getGuest(phone);
+    if (!guest) return res.status(404).json({ error: `No existe el invitado ${phone}` });
+    await deleteGuest(phone);
+    res.json({ ok: true, deleted: { phone, name: guest.name, stage: guest.stage } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
