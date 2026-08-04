@@ -5,3 +5,6 @@ node_modules/
 logs/
 tmp/
 .DS_Store
+
+site/assets/video-propuesta-matrimonio.mp4
+site/assets/*.mp4
