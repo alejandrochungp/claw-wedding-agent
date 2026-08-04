@@ -158,6 +158,24 @@ form.contact-form { display: flex; flex-direction: column; gap: 14px; background
 .footer-links a:hover { color: var(--color-secondary); }
 .footer-copy { text-align: center; font-size: .8rem; opacity: .6; margin-top: 22px; }
 
+/* ---------- Logos de confianza (Fase 6) ---------- */
+.logos-row {
+  display: flex; align-items: center; justify-content: center;
+  gap: 44px; flex-wrap: wrap; padding: 18px 0 6px;
+}
+.logos-row img {
+  height: 34px; width: auto;
+  filter: grayscale(1) contrast(1.05);
+  opacity: .72;
+  transition: opacity .2s, filter .2s;
+}
+.logos-row img:hover { opacity: 1; filter: grayscale(.2); }
+.logos-note { text-align: center; font-size: .85rem; opacity: .6; margin-top: 16px; }
+@media (max-width: 820px) {
+  .logos-row { gap: 26px; }
+  .logos-row img { height: 26px; }
+}
+
 /* ---------- WhatsApp float ---------- */
 .wa-float {
   position: fixed; bottom: 22px; right: 22px; width: 56px; height: 56px;

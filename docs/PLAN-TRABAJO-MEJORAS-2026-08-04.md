@@ -108,13 +108,14 @@
 | Railway | `railway.svg` (788B) | Simple Icons CDN |
 | Meta | `meta.svg` (1339B) | Simple Icons CDN |
 
-### Tareas (NO ejecutadas — esperando aprobación del plan)
-- [ ] 6.1 Sección "Tecnología de confianza" en la landing (entre beneficios y cómo funciona, o antes del footer)
-- [ ] 6.2 Los 4 logos en fila horizontal, B&W (los SVG de Simple Icons ya son monocromo; OpenAI de Wikimedia puede requerir CSS `filter: grayscale(1) contrast(1.1)`)
-- [ ] 6.3 Texto sutil: "Construido con tecnologías de clase mundial" o similar
-- [ ] 6.4 Verificar render en móvil (logos se ven bien en 390px)
+### Tareas (EJECUTADAS 04-Ago 10:46 ✅)
+- [x] 6.1 Sección "Construido con tecnología de clase mundial" en la landing (entre prueba social y footer)
+- [x] 6.2 Los 4 logos en fila horizontal B&W (Anthropic, OpenAI, Railway, Meta) — SVG monocromo + CSS `filter: grayscale(1)`
+- [x] 6.3 Texto: "Las mismas plataformas que usan las grandes empresas, para que tu boda funcione sin fallas" + nota "IA, nube y WhatsApp Business oficial"
+- [x] 6.4 Verificar render en móvil (CSS responsive: logos 26px en <820px)
+- [x] 6.5 Fix permisos: directorio `assets/logos` quedó 700 → 755 (403 → 200)
 
-**Nota:** Anthropic/OpenAI aparecen por el LLM (DeepSeek corre bajo el ecosistema OpenAI-compatible; el stack del producto usa Anthropic en proyectos Yeppo/Softify — confirmar con Alejandro si se incluyen ambos o solo los que efectivamente usa el producto: Railway + Meta + DeepSeek).
+**Nota (decisión Alejandro 04-Ago 10:46):** se incluyen Anthropic y OpenAI con sus logos, aunque el LLM del producto es DeepSeek (OpenAI-compatible). El texto dice "IA" genérico para no afirmar uso directo de Anthropic.
 
 ---
 
