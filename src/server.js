@@ -455,9 +455,16 @@ async function handleIncomingMessage(msg, fromPhone) {
   const role = await getActorRole(from);
   console.log(`🎭 Rol detectado para ${from}: ${role}`);
 
+  // Mensajes del form del micrositio (rsvp.html / no-confirmado.html):
+  // SIEMPRE se procesan como RSVP, sin importar el rol (un novio también puede probar el form)
+  const isFormRsvp = /confirmo mi asistencia a la boda|no podr[ée] asistir a la boda|asistencia a la boda/i.test(text);
+
   // Botones SIEMPRE son RSVP (vienen de templates oficiales de la boda)
   if (interactiveType === 'button') {
     await handleButtonReply(from, interactiveId, text);
+  } else if (msgType === 'text' && isFormRsvp) {
+    // Form del micrositio → parseo estructurado (Fase 2)
+    await handleRsvpFormMessage(from, text);
   } else if (msgType === 'text') {
     if (role === 'novio') {
       // Novio: comandos de gestión (Fase 2: agregar invitados, etc.)
@@ -487,6 +494,72 @@ async function handleIncomingMessage(msg, fromPhone) {
     }));
     await redis.expire(CONVERSATION_KEY, 86400 * 30);
   } catch (e) { /* ignore */ }
+}
+
+// ── RSVP Form Parser (micrositio) ────────────────────────────
+// El form de rsvp.html arma un mensaje con emojis por campo:
+//   Hola! Confirmo mi asistencia a la boda:
+//   👤 Nombre
+//   📱 +569...
+//   ✅ Asistencia: SÍ 🎉
+//   👥 Acompañantes: N
+//   🍽 Restricciones: ...
+//   🅿️ Estacionamiento: Sí
+//   💌 Mensaje: ...
+function parseRsvpForm(text) {
+  const get = (re) => {
+    const m = text.match(re);
+    return m ? m[1].trim() : null;
+  };
+  return {
+    nombre: get(/👤\s*([^\n]+)/),
+    phone: get(/📱\s*([^\n]+)/),
+    asistencia: get(/Asistencia:\s*([^\n]+)/),
+    acompanantes: get(/Acompa[ñn]antes?:\s*([^\n]+)/),
+    restricciones: get(/Restricciones?:\s*([^\n]+)/),
+    estacionamiento: get(/Estacionamiento:\s*([^\n]+)/),
+    mensaje: get(/💌\s*Mensaje?:\s*([^\n]+)/),
+  };
+}
+
+async function handleRsvpFormMessage(from, text) {
+  const d = parseRsvpForm(text);
+  const asistRaw = (d.asistencia || '').toLowerCase();
+
+  let status;
+  if (/s[ií]|all[iá] estar|🎉/.test(asistRaw)) status = '✅ Confirmado (form)';
+  else if (/no|😢/.test(asistRaw)) status = '❌ No asistirá (form)';
+  else status = '🤔 Tal vez (form)';
+
+  const entry = {
+    timestamp: new Date().toISOString(),
+    telefono: from,
+    rsvp: status,
+    nombre: d.nombre || null,
+    acompanantes: d.acompanantes || '0',
+    restricciones: d.restricciones || null,
+    estacionamiento: d.estacionamiento || null,
+    mensaje: d.mensaje || null,
+    notas: 'Form micrositio',
+    updated: 'nuevo',
+  };
+
+  try {
+    await redis.rpush(RSVP_KEY, JSON.stringify(entry));
+    console.log(`📊 RSVP form guardado: ${from} → ${status}`);
+  } catch (err) {
+    console.error('❌ RSVP form save error:', err.message);
+  }
+
+  await notifySlack(`🎉 *RSVP FORM* \`${from}\`: ${status}${d.nombre ? ` — ${d.nombre}` : ''}${d.acompanantes && d.acompanantes !== '0' ? ` (${d.acompanantes} acompañantes)` : ''}`);
+
+  // Respuesta de confirmación al remitente
+  const reply = status.includes('Confirmado')
+    ? `¡Gracias por confirmar${d.nombre ? `, ${d.nombre}` : ''}! 🎉 Nos vemos el 17 de noviembre. 📅 Agrega el evento a tu calendario: ${TENANT.calendarUrl}`
+    : status.includes('No asistirá')
+      ? 'Gracias por avisarnos, lo entendemos completamente 🫶 Te tendremos presente ese día.'
+      : '¡Gracias por tu respuesta! 🤔 Si luego decides venir, solo escríbenos "sí, voy".';
+  await sendWhatsAppMessage(from, reply);
 }
 
 // ── Novio Commands (Fase 2) ──────────────────────────────────
