@@ -129,31 +129,45 @@ async function deleteGuest(phone) {
 | # | Decisión | Estado |
 |---|----------|--------|
 | 1 | **Confirmación antes de eliminar: SÍ** | ✅ CONFIRMADO |
-| 2 | **Eliminar RSVP asociado o mantener histórico:** mantener histórico (sugerencia Claw — ver abajo) | ✅ Sugerencia aceptada por defecto |
+| 2 | **Eliminar RSVP asociado o mantener histórico:** **OPCIÓN B — borrar también el RSVP** (decisión final 18:58) | ✅ CONFIRMADO |
 | 3 | **Confirmación por texto** (`sí, eliminar`) | ✅ CONFIRMADO (sin botones) |
-| 4 | **¿Ver invitados en esta tanda?** SÍ — incluir G1+G2 juntos (sugerencia Claw) | ✅ Sugerencia aceptada por defecto |
+| 4 | **¿Ver invitados en esta tanda?** SÍ — incluir G1+G2 juntos (sugerencia Claw) | ✅ CONFIRMADO |
 
 ---
 
 ## 5b. Sugerencias de Claw (04-Ago 18:08)
 
 ### ¿Eliminar el RSVP asociado o mantener histórico?
-**Recomendación: mantener el histórico en `wedding:rsvps`** pero marcar el guest como eliminado en un log.
-- El RSVP es un **registro de auditoría** (quién confirmó, cuándo, con qué acompañantes) — borrarlo pierde trazabilidad
-- Al eliminar el invitado: `hdel wedding:guests {phone}` + limpiar actor + **dejar el RSVP en el histórico** (sin tocarlo)
-- El conteo de confirmaciones (`/admin/stats`) sigue siendo correcto porque cuenta desde `wedding:rsvps`
-- Si más adelante el invitado se re-agrega, su RSVP histórico sigue disponible
-- **Alternativa (si prefiere BD limpia):** borrar también de `wedding:rsvps` — pero pierde auditoría
+**Decisión final de Alejandro (18:58): OPCIÓN B — borrar todo.**
+- `deleteGuest(phone)` borra: hash `wedding:guests` + actor (`wedding:actors`) + **RSVP asociado de `wedding:rsvps`** (filtra la lista y re-crea sin ese teléfono)
+- Las stats quedan limpias: el eliminado ya no cuenta como confirmado
 
 ### ¿Ver invitados en esta tanda o solo eliminar?
-**Recomendación: incluir ambos (G1 eliminar + G2 ver invitados) juntos.**
-- `ver invitados` es barato (hgetall ya existe) y complementa a eliminar: necesitas ver la lista para decidir a quién eliminar
-- G3 (reenviar) y G4 (editar) quedan para una segunda tanda
+**Decisión final: incluir ambos (G1 + G2) juntos.**
 
 ---
 
-## 6. Alcance final de la tanda aprobada (G1+G2)
-1. Comando `eliminar invitado {phone}` con confirmación por texto
-2. Comando `ver invitados` (listado completo con stages + resumen por estado)
-3. Helper `deleteGuest(phone)` + endpoint `DELETE /admin/guests/{phone}?force=1`
-4. Menú de novios actualizado con los comandos nuevos
+## 6. ✅ IMPLEMENTADO + DESPLEGADO (04-Ago 19:00, deploy `2741bccf`) — VERIFICADO
+
+### G1 — Eliminar invitado
+- Comando: `eliminar invitado {phone}` → confirma: `sí, eliminar` (TTL 2 min en `wedding:pend_delete:{from}`)
+- `deleteGuest(phone)`: borra guests + actor + RSVP (Opción B)
+- Endpoint: `DELETE /admin/guests/:phone`
+- Verificado en producción ✅
+
+### G2 — Ver invitados
+- Comando: `ver invitados` → listado con stages (🆕/📨/✅/❌/🤔) + resumen por estado + 👫 para parejas
+- 13 invitados visibles en producción ✅
+
+### Parejas vinculadas 👫 (aprobadas 18:56)
+- `agregar a A +56 9... y B +56 9...` → crea 2 guests con `coupleId` + `partnerPhone`
+- `vincular pareja {p1} {p2}` → vincula invitados existentes
+- `getConfirmedStats()` → absorbe el +1 mutuo (si ambos confirmaron, 2 personas no 4)
+- Aplica en: `ver confirmaciones`, `/admin/stats` (totalAsistentes)
+- Verificado: stats con `totalAsistentes: 6` (6 confirmados, 0 acompañantes duplicados) ✅
+
+### Menú de novios actualizado
+- `🎛️ Panel de novios` ahora lista: agregar (individual/pareja), enviar invitación (uno/todos), ver invitados, ver confirmaciones, vincular pareja, eliminar invitado
+
+### Commits
+- `689b041` (G1+G2+Parejas) · deploy `2741bccf`

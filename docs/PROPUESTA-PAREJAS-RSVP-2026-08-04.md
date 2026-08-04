@@ -101,7 +101,23 @@ En `rsvp.html`, reemplazar el campo libre "N° de acompañantes" por:
 
 ---
 
-## 5. Decisiones que necesito de ti
-1. ❓ ¿Opción A (agregar pareja en un comando) + Opción B (vincular existentes) o solo una?
-2. ❓ ¿Regla de absorción automática (recomendada) o solo la mejora del form?
-3. ❓ ¿Implementar en la misma tanda que la gestión de invitados (G1-G4) o después?
+## 5. ✅ IMPLEMENTADO + DESPLEGADO (04-Ago 19:00, deploy `2741bccf`) — VERIFICADO
+
+### Implementado
+1. **`addGuestViaChat` con parejas:** `agregar a María +56 9... y Juan +56 9...` → crea 2 guests con `coupleId` + `partnerPhone` (mismo `coupleId`, teléfonos cruzados)
+2. **Comando `vincular pareja {p1} {p2}`** → vincula invitados ya existentes (helper `linkCouple`)
+3. **`getConfirmedStats()`** → regla de absorción: si un confirmado tiene +1 y su pareja (coupleId) TAMBIÉN confirmó → el +1 se absorbe (2 personas en vez de 4)
+4. Aplica en: `ver confirmaciones` (WhatsApp) + `/admin/stats` (totalAsistentes)
+5. Listado `ver invitados` muestra 👫 para parejas
+
+### Verificado en producción
+- 13 invitados cargados (7 invitación enviada, 6 nuevo)
+- Stats: `total: 7, confirmed: 6, totalAsistentes: 6` — sin duplicados de +1 ✅
+
+### Estructura de datos (implementada)
+```json
+{ "name": "María", "phone": "+569...", "coupleId": "CP-XXXXXX", "partnerPhone": "+569...", "stage": "nuevo", "templatesSent": [] }
+```
+
+### Commits
+- `689b041` · deploy `2741bccf`
