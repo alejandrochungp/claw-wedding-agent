@@ -736,7 +736,10 @@ async function migrateGuestsToListHash() {
   }
 }
 
-// Enviar invitación (save_the_date_v4_img) a un invitado
+// URL de la foto para templates con IMAGE header (micrositio, verificado 200)
+const SAVE_THE_DATE_IMG_URL = (TENANT.siteUrl || 'https://alejandro-kuilen.noscasamos.vip').replace(/\/$/, '') + '/assets/foto-pareja.jpg';
+
+// Enviar invitación (save_the_date_v4_img con header IMAGE) a un invitado
 async function sendInviteToGuest(from, phone) {
   const guest = await getGuest(phone);
   if (!guest) {
@@ -749,14 +752,20 @@ async function sendInviteToGuest(from, phone) {
     await sendWhatsAppMessage(from, `ℹ️ A *${guest.name}* ya se le envió la invitación (stage: ${guest.stage}).`);
     return;
   }
-  const result = await sendTemplate(phone, 'save_the_date_v4_img', [guest.nombre1 || '']);
-  if (result?.messages?.[0]?.id) {
-    await recordTemplateSent(phone, 'save_the_date_v4_img', result.messages[0].id);
-    await updateGuestStage(phone, 'invitacion_enviada');
-    await sendWhatsAppMessage(from, `✅ Invitación enviada a *${guest.name}* (${phone}).\nStage: invitacion_enviada`);
-    await notifySlack(`📨 *Invitación enviada* a \`${guest.name}\` (${phone}) por comando del novio`);
-  } else {
-    await sendWhatsAppMessage(from, `❌ No se pudo enviar la invitación a ${phone}. Verifica que tenga conversación abierta o el template aprobado.`);
+  try {
+    const mediaId = await uploadImageToMeta(SAVE_THE_DATE_IMG_URL);
+    const result = await sendInviteTemplate(phone, mediaId);
+    if (result?.messages?.[0]?.id) {
+      await recordTemplateSent(phone, 'save_the_date_v4_img', result.messages[0].id);
+      await updateGuestStage(phone, 'invitacion_enviada');
+      await sendWhatsAppMessage(from, `✅ Invitación enviada a *${guest.name}* (${phone}).\nStage: invitacion_enviada`);
+      await notifySlack(`📨 *Invitación enviada* a \`${guest.name}\` (${phone}) por comando del novio`);
+    } else {
+      await sendWhatsAppMessage(from, `❌ No se pudo enviar la invitación a ${phone}. Verifica el template/estado del número.`);
+    }
+  } catch (e) {
+    console.error('❌ sendInviteToGuest error:', e.message);
+    await sendWhatsAppMessage(from, `❌ Error al enviar invitación a ${phone}: ${e.message.slice(0, 120)}`);
   }
 }
 
@@ -772,13 +781,20 @@ async function sendInviteToAll(from) {
       return;
     }
     let ok = 0, fail = 0;
+    let mediaId = null;
     for (const g of pendientes) {
-      const result = await sendTemplate(g.phone, 'save_the_date_v4_img', []);
-      if (result?.messages?.[0]?.id) {
-        await recordTemplateSent(g.phone, 'save_the_date_v4_img', result.messages[0].id);
-        await updateGuestStage(g.phone, 'invitacion_enviada');
-        ok++;
-      } else {
+      try {
+        if (!mediaId) mediaId = await uploadImageToMeta(SAVE_THE_DATE_IMG_URL); // subir foto una vez
+        const result = await sendInviteTemplate(g.phone, mediaId);
+        if (result?.messages?.[0]?.id) {
+          await recordTemplateSent(g.phone, 'save_the_date_v4_img', result.messages[0].id);
+          await updateGuestStage(g.phone, 'invitacion_enviada');
+          ok++;
+        } else {
+          fail++;
+        }
+      } catch (e) {
+        console.error(`❌ batch invite ${g.phone}:`, e.message);
         fail++;
       }
       await new Promise(r => setTimeout(r, 300)); // rate limit
@@ -1105,6 +1121,57 @@ async function sendAutoReply(to, text) {
   if (reply) {
     await sendWhatsAppMessage(to, reply);
   }
+}
+
+// ── Send WhatsApp Template con IMAGE header (save_the_date_v4_img) ──
+// El template v4_img requiere: header IMAGE (foto fresca subida) + 3 variables de body
+async function uploadImageToMeta(imageUrl) {
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 30000 });
+  const img = Buffer.from(imgRes.data);
+  const boundary = '----WebKitFormBoundary' + Math.random().toString(16).slice(2, 14);
+  const head = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="messaging_product"\r\n\r\nwhatsapp\r\n` +
+    `--${boundary}\r\nContent-Disposition: form-data; name="type"\r\n\r\nimage/jpeg\r\n` +
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="foto-pareja.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`
+  );
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const body = Buffer.concat([head, img, tail]);
+  const res = await axios.post(`${META_API}/${PHONE_NUMBER_ID}/media`, body, {
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    },
+    timeout: 30000,
+  });
+  return res.data.id;
+}
+
+async function sendInviteTemplate(to, mediaId) {
+  // Body: "Nos casamos el {{1}} de {{2}} de {{3}}." → 17 / noviembre / 2026
+  const [anio, mesNum, dia] = (TENANT.fecha || '2026-11-17').split('-');
+  const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const res = await axios.post(`${META_API}/${PHONE_NUMBER_ID}/messages`, {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: to,
+    type: 'template',
+    template: {
+      name: 'save_the_date_v4_img',
+      language: { code: 'es' },
+      components: [
+        { type: 'header', parameters: [{ type: 'image', image: { id: mediaId } }] },
+        { type: 'body', parameters: [
+          { type: 'text', text: String(parseInt(dia, 10)) },
+          { type: 'text', text: meses[parseInt(mesNum, 10) - 1] || 'noviembre' },
+          { type: 'text', text: anio },
+        ]},
+      ],
+    },
+  }, {
+    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+    timeout: 30000,
+  });
+  return res.data;
 }
 
 // ── Send WhatsApp Message ─────────────────────────────────────
