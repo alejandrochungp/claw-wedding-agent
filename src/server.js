@@ -457,7 +457,9 @@ async function handleIncomingMessage(msg, fromPhone) {
 
   // Mensajes del form del micrositio (rsvp.html / no-confirmado.html):
   // SIEMPRE se procesan como RSVP, sin importar el rol (un novio también puede probar el form)
-  const isFormRsvp = /confirmo mi asistencia a la boda|no podr[ée] asistir a la boda|asistencia a la boda/i.test(text);
+  // Tolerante a typos: detecta por estructura (👤 + "Asistencia:") o frase con fuzzy "asist\w*"
+  const isFormRsvp = /confirmo mi asist\w* a la boda|no podr\w* asist\w* a la boda|asist\w* a la boda/i.test(text)
+    || (/👤/.test(text) && /asist\w*\s*:/i.test(text));
 
   // Botones SIEMPRE son RSVP (vienen de templates oficiales de la boda)
   if (interactiveType === 'button') {
@@ -514,11 +516,12 @@ function parseRsvpForm(text) {
   return {
     nombre: get(/👤\s*([^\n]+)/),
     phone: get(/📱\s*([^\n]+)/),
-    asistencia: get(/Asistencia:\s*([^\n]+)/),
-    acompanantes: get(/Acompa[ñn]antes?:\s*([^\n]+)/),
-    restricciones: get(/Restricciones?:\s*([^\n]+)/),
-    estacionamiento: get(/Estacionamiento:\s*([^\n]+)/),
-    mensaje: get(/💌\s*Mensaje?:\s*([^\n]+)/),
+    // Labels tolerantes a typos (asistensia/asitencia → asist\w*)
+    asistencia: get(/asist\w*\s*:\s*([^\n]+)/i),
+    acompanantes: get(/acompa\w*\s*:\s*([^\n]+)/i),
+    restricciones: get(/restric\w*\s*:\s*([^\n]+)/i),
+    estacionamiento: get(/estacion\w*\s*:\s*([^\n]+)/i),
+    mensaje: get(/💌\s*mensaj\w*\s*:\s*([^\n]+)/i),
   };
 }
 
