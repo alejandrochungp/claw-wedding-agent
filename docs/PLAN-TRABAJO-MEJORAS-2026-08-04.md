@@ -21,7 +21,7 @@
 
 | Item | Estado |
 |------|--------|
-| Botón header móvil "Quiero esto para mi boda": pasaba a fila propia full-width entre brand y nav (CSS `order:2; width:100%; text-align:center`) | ✅ Corregido + desplegado + verificado (screenshot 390px) |
+| Botón header móvil "Quiero esto para mi boda": **ELIMINADO** (consumía mucho viewport en móvil — decisión Alejandro 04-Ago 08:46) | ✅ Corregido + desplegado + verificado (4 páginas + CSS limpio) |
 | Nombre producto: "No Nos Casamos" → **"Nos Casamos"** | ✅ Corregido en las 4 páginas |
 | Menciones a Slack eliminadas del sitio producto | ✅ (0 ocurrencias) |
 | Form contacto: bug `name="text"` múltiple → JS arma mensaje único | ✅ Corregido |
@@ -96,15 +96,82 @@
 
 ---
 
-## Prioridades sugeridas
+## Fase 6 — Sección de confianza con tecnologías (sitio producto) ⭐ NUEVA 04-Ago
 
-1. **Fase 1 + 2** (agente dual + invitados conversacional) — núcleo del producto, sin dependencias externas
-2. **Fase 3** (codigonovios MP) — requiere cuenta Mercado Pago + addon domain
-3. **Fase 4** (recordatorios regalos) — depende de 3
-4. **Fase 5** (productización) — continua
+**Objetivo:** aumentar la confianza del cliente mostrando las tecnologías que usamos. Logos en **blanco y negro, vista horizontal**.
+
+### Logos (YA descargados ✅ a `product-site/assets/logos/`)
+| Logo | Archivo | Fuente |
+|------|---------|--------|
+| Anthropic | `anthropic.svg` (296B) | Simple Icons CDN (monocromo) |
+| OpenAI | `openai.svg` (2946B) | Wikimedia Commons |
+| Railway | `railway.svg` (788B) | Simple Icons CDN |
+| Meta | `meta.svg` (1339B) | Simple Icons CDN |
+
+### Tareas (NO ejecutadas — esperando aprobación del plan)
+- [ ] 6.1 Sección "Tecnología de confianza" en la landing (entre beneficios y cómo funciona, o antes del footer)
+- [ ] 6.2 Los 4 logos en fila horizontal, B&W (los SVG de Simple Icons ya son monocromo; OpenAI de Wikimedia puede requerir CSS `filter: grayscale(1) contrast(1.1)`)
+- [ ] 6.3 Texto sutil: "Construido con tecnologías de clase mundial" o similar
+- [ ] 6.4 Verificar render en móvil (logos se ven bien en 390px)
+
+**Nota:** Anthropic/OpenAI aparecen por el LLM (DeepSeek corre bajo el ecosistema OpenAI-compatible; el stack del producto usa Anthropic en proyectos Yeppo/Softify — confirmar con Alejandro si se incluyen ambos o solo los que efectivamente usa el producto: Railway + Meta + DeepSeek).
+
+---
+
+## Fase 7 — BD de LEADS del producto (separada de invitados) ⭐ NUEVA 04-Ago
+
+**Objetivo:** cuando un lead cae para el producto (Nos Casamos), que quede **almacenado en una base de datos propia** — NO mezclar con la lista de invitados de la boda — para poder referenciar los datos de los futuros novios y hacerles **seguimiento con una estrategia de marketing (aún por definir)**.
+
+### Requisitos (definidos por Alejandro)
+- Almacenar TODO lead que contacte por el producto (form contacto del sitio + WhatsApp del bot en modo lead)
+- BD/colección **separada** de `invitados` (contextos distintos: invitado ≠ prospecto)
+- Poder referenciar los datos enviados por los futuros novios
+- Base para campañas de marketing futuras (follow-up, nurturing)
+
+### Diseño propuesto (pendiente validación)
+| Campo | Tipo | Nota |
+|-------|------|------|
+| `id` | UUID | PK |
+| `phone` | string | WhatsApp (único por lead) |
+| `email` | string | del form contacto |
+| `nombres` | string | novio/novia |
+| `fecha_boda` | date | |
+| `ciudad` | string | |
+| `n_invitados` | int | |
+| `plan_interes` | enum | Esencial/Completo/Premium/Solo micrositio |
+| `mensaje` | text | |
+| `origen` | enum | form_sitio / whatsapp_bot / otro |
+| `estado` | enum | nuevo / contactado / calificado / cerrado / perdido |
+| `createdAt` / `updatedAt` | datetime | |
+| `notas_marketing` | text | seguimiento interno |
+
+**Opciones de almacenamiento (evaluar):**
+- **A) Redis hash** (`lead:{phone}`) — rápido, ya en el stack, pero sin queries complejas
+- **B) Notion DB "Leads Nos Casamos"** — visible/editable, ya usamos Notion; gratis hasta 1000 filas
+- **C) Postgres (Railway)** — escalable, queries de marketing (recomendado para estrategia futura)
+
+### Tareas (NO ejecutadas — esperando aprobación)
+- [ ] 7.1 Decidir storage (A/B/C) + crear DB/colección
+- [ ] 7.2 Hook en form de contacto del sitio (POST a Railway en vez de solo wa.me)
+- [ ] 7.3 Modo lead del bot: al detectar prospecto → guardar en BD de leads
+- [ ] 7.4 Pipeline de estados + panel simple de seguimiento
+- [ ] 7.5 (futuro) Estrategia de marketing: campañas WhatsApp/email a leads no convertidos
+
+---
+
+## Prioridades sugeridas (ACTUALIZADO 04-Ago 08:46)
+
+1. **Fase 1 + 2** (agente dual + invitados conversacional) — núcleo del producto
+2. **Fase 7** (BD de leads) — barato, alto valor para marketing futuro
+3. **Fase 6** (sección de confianza) — 30 min, mejora conversión del sitio
+4. **Fase 3** (codigonovios MP) — requiere cuenta Mercado Pago + addon domain
+5. **Fase 4** (recordatorios regalos) — depende de 3
+6. **Fase 5** (productización) — continua
 
 ## Bloqueantes / decisiones pendientes
 - [ ] Cuenta Mercado Pago comercial (¿Aconcagua Capital SpA o nueva?)
 - [ ] % de comisión exacto
 - [ ] Banco/cuenta corriente destino de los novios (para payout MP)
 - [ ] Confirmar si novios de la boda test (Alejandro/Kuilen) se registran ya como "novios" del tenant
+- [ ] **Storage de leads: Redis vs Notion vs Postgres (recomendado)**
+- [ ] **Logos: incluir solo Railway+Meta+DeepSeek o también Anthropic/OpenAI** (confirmar stack público del producto)

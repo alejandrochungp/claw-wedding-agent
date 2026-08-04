@@ -174,8 +174,5 @@ form.contact-form { display: flex; flex-direction: column; gap: 14px; background
   .header-inner { gap: 14px; }
   .main-nav { order: 3; width: 100%; justify-content: space-between; gap: 8px; }
   .main-nav a { font-size: .85rem; }
-  /* Fix móvil: el botón CTA no debe quedar apretado al lado del brand
-     → pasa a fila propia full-width entre brand y nav */
-  .header-inner .btn-sm { order: 2; width: 100%; text-align: center; margin: 2px 0 6px; }
   .section-title { font-size: 1.5rem; }
 }
