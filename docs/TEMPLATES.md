@@ -147,7 +147,7 @@ Nos casamos el {{1}} de {{2}} de {{3}}. Reserva la fecha y confirma tu asistenci
 
 ## Template 9: `boda_info_img` (URL BUTTONS + IMAGE HEADER) — 03-Ago
 
-**Meta ID:** `2386197625122304` | **Status:** PENDING | **Categoría:** UTILITY | **Idioma:** es
+**Meta ID:** `2386197625122304` | **Status:** ✅ APPROVED (04-Ago) | **Categoría:** UTILITY | **Idioma:** es
 
 ### Header (IMAGE)
 Foto pareja (mismo handle que v4_img)
@@ -183,7 +183,7 @@ Todo el detalle en nuestro sitio:
 
 ## Template 10: `boda_galeria_img` (URL BUTTON + IMAGE HEADER) — 03-Ago
 
-**Meta ID:** `1922211198453227` | **Status:** PENDING | **Categoría:** MARKETING | **Idioma:** es
+**Meta ID:** `1922211198453227` | **Status:** ✅ APPROVED (04-Ago) | **Categoría:** MARKETING | **Idioma:** es
 
 ### Header (IMAGE)
 Foto pareja (mismo handle)
