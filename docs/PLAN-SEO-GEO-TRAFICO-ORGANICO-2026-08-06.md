@@ -80,13 +80,32 @@ Empezar a obtener tráfico orgánico desde **buscadores (Google)** y **motores d
 
 ---
 
-## 5. Decisiones que necesito de ti ANTES de arrancar
+## 5. Decisiones de Alejandro (CONFIRMADAS 06-Ago 14:52) ✅
 
-1. ❓ **¿Dónde vive el blog?** En el propio noscasamos.vip (`/blog/`) o subdominio separado — recomiendo carpeta `/blog/` en el mismo dominio (mejor SEO)
-2. ❓ **¿Autor de los artículos?** Firmados por "Nos Casamos" o por ti (Alejandro) como fundador — recomendación: firma de fundador (más autoridad)
-3. ❓ **¿Caso de estudio público?** ¿OK documentar la boda de ustedes con fotos/video reales en el blog, o versión anonimizada con fotos de banco?
-4. ❓ **¿Presupuesto?** Todo lo propuesto es $0 (solo tiempo). ¿OK con eso?
-5. ❓ **¿Prioridad?** Arrancar con S1 (técnico) + S2 (2 artículos) primero, o prefieres solo el contenido y dejar lo técnico para después?
+| # | Decisión | Estado |
+|---|----------|--------|
+| 1 | **Blog en SUBDOMINIO** `blog.noscasamos.vip` | ✅ CONFIRMADO |
+| 2 | **Firma de fundador** en colaboración con desarrollo + **Programa Emprender**, desarrolladores profesionales | ✅ CONFIRMADO |
+| 3 | **Caso de estudio PÚBLICO** (boda real Alejandro & Kuilen) para credibilidad | ✅ CONFIRMADO |
+| 4 | **Presupuesto $0** (solo tiempo) | ✅ CONFIRMADO |
+| 5 | **S1 ahora** + en paralelo **infraestructura Código Novios** (recaudación lista para carta formal) | ✅ CONFIRMADO |
+
+---
+
+## 5b. Ejecución en curso (06-Ago 14:52+)
+
+### S1 — Técnico SEO
+- Crear subdominio `blog.noscasamos.vip` en cPanel (uapi addsubdomain, patrón alejandro-kuilen)
+- GSC: verificar blog.noscasamos.vip + noscasamos.vip + codigonovios.cl
+- sitemap.xml + robots.txt
+- Meta tags + OG en páginas
+- Schema FAQPage/HowTo/Product
+
+### Código Novios — infraestructura (paralelo)
+- Backend Railway + Postgres tabla lista/regalos
+- Endpoint público `codigonovios.cl/n/{slug}`
+- Mercado Pago (pagos + payouts)
+- Listo para cuando la carta formal (`invitacion_formal`) incluya el código
 
 ---
 
