@@ -86,7 +86,18 @@ Resultado:
 
 ---
 
-## 5. Decisiones que necesito de ti
-1. ❓ ¿Implemento la corrección completa (regex + normalizePhone + Slack + admin)?
-2. ❓ ¿Tienes un número internacional real para testear el envío (ej: familia de Kuilen en China/Corea)?
-3. ❓ ¿Vale la pena revisar tarifas Meta por país antes de invitar internacionales?
+## 5. ✅ IMPLEMENTADO + DESPLEGADO (06-Ago 13:45, deploys `1bb34e1c` + `3c276a96`) — VERIFICADO
+
+### Implementado (commit `96ef975` + `144d384`)
+1. **`PHONE_RE` universal** — acepta Chile (`+56 9...` / `56 9...` / `9...`) e internacional con `+` obligatorio tolerando separadores: `+1 786 236-7638`, `+34 612 345 678`, `+86 138 0013 8000`
+2. **`normalizePhone` E.164 estricto** — preserva el `+` (antes lo perdía → fallaba en Meta)
+3. Reemplazados los 12 usos del regex chileno (handleNovioCommand, addGuestViaChat, Slack, admin)
+
+### Verificado en producción
+- `agregar a Kevin Mateluna +1 786 236-7638` → guardado como `+17862367638` ✅ (total 19 invitados)
+- Duplicado bloqueado: agregar a Amín Juris 2ª vez → aviso, 1 solo registro (no sobrescribe) ✅
+
+### Sobrescrituras detectadas en logs (previas al fix)
+- **Amín Juris** (+56 9 8469 7154): agregado 2× → sobrescrito (stage nuevo, sin envíos → sin daño crítico)
+- **Juanling Luo** (+56 9 8220 0975): agregado 2× → idem
+- **Kevin Mateluna** (+1 786...): el intento original NO llegó (regex chileno lo rechazaba)

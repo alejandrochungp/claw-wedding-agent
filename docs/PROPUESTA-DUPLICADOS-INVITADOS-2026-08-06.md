@@ -89,7 +89,24 @@ async function guestExists(phone) {
 
 ---
 
-## 5. Decisiones que necesito de ti
-1. ❓ ¿Confirmación `actualizar a {phone}` / `cancelar` (recomendado) o directamente no permitir duplicados?
-2. ❓ ¿En el aviso mostramos stage + nº de envíos + fecha (como propongo) o algo más simple?
-3. ❓ ¿Quieres que el aviso sugiera `ver invitados` para revisar antes de decidir?
+## 6. ✅ IMPLEMENTADO + DESPLEGADO (06-Ago 13:45, deploy `3c276a96`) — VERIFICADO
+
+### Decisiones de Alejandro (13:13)
+1. **Bloquear duplicados directamente** (sin ofrecer actualizar/cancelar) ✅
+2. Aviso con **stage + envíos + fecha** ✅
+3. Aviso **sugiere "ver invitados"** para revisar ✅
+
+### Implementado (commit `96ef975`)
+- `addGuestViaChat` (individual): si `getGuest(phone)` existe → avisa y NO sobrescribe:
+```
+⚠️ *María* (+56 9...) ya está en la lista — no lo agregué de nuevo.
+• Stage: confirmado
+• Invitación: 1 envío(s)
+• Agregado: 2026-08-04
+➡️ Revisa con *"ver invitados"* antes de decidir.
+```
+- `addGuestViaChat` (pareja): verifica AMBOS teléfonos antes de crear; si alguno existe → avisa cuál y bloquea
+
+### Verificado en producción
+- Agregar a Amín Juris 2ª vez (ya existía) → bloqueado, sigue 1 solo registro (total 19) ✅
+- No se pierden stage/historial/pareja en duplicados ✅
