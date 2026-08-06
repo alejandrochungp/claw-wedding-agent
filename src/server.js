@@ -202,12 +202,12 @@ const TENANT = {
 
 // ── Phone Formatting ─────────────────────────────────────────
 // Regex universal: Chile (+56 9... / 56 9... / 9...) e internacional con + obligatorio
-// (el + evita falsos positivos con fechas/montos en texto libre)
-const PHONE_RE = /(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+\d{1,3}\s?\d{6,12})/g;
-const PHONE_RE_SINGLE = /(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+\d{1,3}\s?\d{6,12})/;
+// El patrón internacional tolera separadores: +1 786 236-7638, +34 612 345 678, +86 138 0013 8000
+const PHONE_RE = /(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+[\d\s\-\(\)]{8,18})/g;
+const PHONE_RE_SINGLE = /(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+[\d\s\-\(\)]{8,18})/;
 
 function normalizePhone(phone) {
-  // E.164 estricto: +[código país][número]
+  // E.164 estricto: +[código país][número] (sin separadores)
   let cleaned = String(phone).replace(/[\s\-\(\)]/g, '');
   if (cleaned.startsWith('+')) return `+${cleaned.slice(1)}`; // preserva código país
   if (cleaned.startsWith('56') && cleaned.length >= 11) return `+${cleaned}`;
