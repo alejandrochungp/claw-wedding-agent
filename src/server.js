@@ -201,10 +201,15 @@ const TENANT = {
 };
 
 // ── Phone Formatting ─────────────────────────────────────────
+// Regex universal: Chile (+56 9... / 56 9... / 9...) e internacional con + obligatorio
+// (el + evita falsos positivos con fechas/montos en texto libre)
+const PHONE_RE = /(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+\d{1,3}\s?\d{6,12})/g;
+const PHONE_RE_SINGLE = /(?:\+?56\s*9\s*\d{4}\s*\d{4}|\+\d{1,3}\s?\d{6,12})/;
+
 function normalizePhone(phone) {
-  // Accept +569XXXXXXXX, 569XXXXXXXX, 9XXXXXXXX
+  // E.164 estricto: +[código país][número]
   let cleaned = String(phone).replace(/[\s\-\(\)]/g, '');
-  if (cleaned.startsWith('+')) cleaned = cleaned.slice(1);
+  if (cleaned.startsWith('+')) return `+${cleaned.slice(1)}`; // preserva código país
   if (cleaned.startsWith('56') && cleaned.length >= 11) return `+${cleaned}`;
   if (cleaned.startsWith('9') && cleaned.length === 9) return `+56${cleaned}`;
   return cleaned;
@@ -382,7 +387,7 @@ async function handleSlackMessage(event) {
   }
 
   // Formato alternativo: +569XXXXXXXX mensaje (sigue funcionando)
-  const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  const phoneMatch = text.match(PHONE_RE_SINGLE);
   let phone = null;
   let message = text;
 
@@ -596,8 +601,8 @@ async function handleNovioCommand(from, text) {
   }
 
   // G1: eliminar invitado (con confirmación)
-  if (/eliminar invitado|quitar a|borrar invitado/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
-    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  if (/eliminar invitado|quitar a|borrar invitado/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+    const phoneMatch = text.match(PHONE_RE_SINGLE);
     const phone = normalizePhone(phoneMatch[0]);
     const guest = await getGuest(phone);
     if (!guest) {
@@ -632,8 +637,8 @@ async function handleNovioCommand(from, text) {
   }
 
   // Parejas: vincular 2 invitados existentes
-  if (/vincular pareja|vincular a|unir pareja/i.test(lower) && (text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || []).length >= 2) {
-    const phones = (text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || []).map(p => normalizePhone(p));
+  if (/vincular pareja|vincular a|unir pareja/i.test(lower) && (text.match(PHONE_RE) || []).length >= 2) {
+    const phones = (text.match(PHONE_RE) || []).map(p => normalizePhone(p));
     const res = await linkCouple(phones[0], phones[1]);
     if (res.ok) {
       await sendWhatsAppMessage(from, `👫 *Pareja vinculada:*\n• ${res.g1.name} (${phones[0]})\n• ${res.g2.name} (${phones[1]})\n🔗 ${res.coupleId}\n\nEl +1 mutuo se contará una sola vez.`);
@@ -645,30 +650,30 @@ async function handleNovioCommand(from, text) {
     return;
   }
 
-  if (/agregar|a[nñ]ade?|agrega|nuevo invitado|invitado/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
+  if (/agregar|a[nñ]ade?|agrega|nuevo invitado|invitado/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
     // Fase 2: parser extrae nombre + WhatsApp (+ correo opcional) — soporta parejas
     await addGuestViaChat(from, text);
     return;
   }
 
   // F1: enviar invitación a un invitado específico
-  if (/enviar invitaci[oó]n a|invitar a/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
-    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  if (/enviar invitaci[oó]n a|invitar a/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+    const phoneMatch = text.match(PHONE_RE_SINGLE);
     await sendInviteToGuest(from, normalizePhone(phoneMatch[0]));
     return;
   }
 
   // G3: reenviar invitación (sin dedupe)
-  if (/reenviar invitaci[oó]n a|reenviar a/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
-    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  if (/reenviar invitaci[oó]n a|reenviar a/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+    const phoneMatch = text.match(PHONE_RE_SINGLE);
     await sendInviteToGuest(from, normalizePhone(phoneMatch[0]), { force: true });
     return;
   }
 
   // G4: editar invitado (correo / nombre / teléfono)
   // editar correo de {phone} a {email}
-  if (/editar correo de/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text) && /[\w.+-]+@[\w-]+\.[\w.]+/.test(text)) {
-    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  if (/editar correo de/i.test(lower) && PHONE_RE_SINGLE.test(text) && /[\w.+-]+@[\w-]+\.[\w.]+/.test(text)) {
+    const phoneMatch = text.match(PHONE_RE_SINGLE);
     const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
     const phone = normalizePhone(phoneMatch[0]);
     const res = await editGuest(phone, 'email', emailMatch[0]);
@@ -678,8 +683,8 @@ async function handleNovioCommand(from, text) {
   }
 
   // editar nombre de {phone} a {nombre}
-  if (/editar nombre de/i.test(lower) && /\+?56\s*9\s*\d{4}\s*\d{4}/.test(text)) {
-    const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  if (/editar nombre de/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+    const phoneMatch = text.match(PHONE_RE_SINGLE);
     const phone = normalizePhone(phoneMatch[0]);
     // Extraer nombre después de "a " (regex exacta, evita split por 'a ' que rompe con 'María')
     const nameMatch = text.match(/a\s+([A-Za-zÁÉÍÓÚáéíóúÑñÜü'\s]+)$/);
@@ -695,8 +700,8 @@ async function handleNovioCommand(from, text) {
   }
 
   // editar teléfono de {viejo} a {nuevo} — reemplaza con aviso
-  if (/editar tel[eé]fono de/i.test(lower) && (text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || []).length >= 2) {
-    const phones = (text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || []).map(p => normalizePhone(p));
+  if (/editar tel[eé]fono de/i.test(lower) && (text.match(PHONE_RE) || []).length >= 2) {
+    const phones = (text.match(PHONE_RE) || []).map(p => normalizePhone(p));
     const res = await editGuest(phones[0], 'phone', phones[1]);
     if (res.ok) {
       await sendWhatsAppMessage(from, `✅ Teléfono de *${res.guest.name}* actualizado: ${res.changed.from} → ${res.changed.to}\n⚠️ El teléfono anterior fue *reemplazado* (ya no es válido).`);
@@ -761,7 +766,7 @@ async function handleNovioCommand(from, text) {
 async function addGuestViaChat(from, text) {
   // Parsear: "agrega a María Pérez +56 9 1234 5678 maria@gmail.com"
   // Pareja: "agrega a María Pérez +56 9 1111 2222 y Juan Soto +56 9 3333 4444"
-  const phonesRaw = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/g) || [];
+  const phonesRaw = text.match(PHONE_RE) || [];
   if (!phonesRaw.length) {
     await sendWhatsAppMessage(from, `⚠️ No encontré el WhatsApp del invitado. Formato:\n\n➡️ *"agregar a María Pérez +56 9 1234 5678"*\n\nPareja: *"agregar a María +56 9... y Juan +56 9..."* (correo opcional)`);
     return;
@@ -775,6 +780,18 @@ async function addGuestViaChat(from, text) {
     // ── PAREJA: crear 2 invitados vinculados (coupleId + partnerPhone) ──
     const phone1 = normalizePhone(phonesRaw[0]);
     const phone2 = normalizePhone(phonesRaw[1]);
+
+    // Bloqueo de duplicados: verificar AMBOS teléfonos antes de crear
+    const dup1 = await getGuest(phone1);
+    const dup2 = await getGuest(phone2);
+    const dups = [];
+    if (dup1) dups.push(`• ${dup1.name} (${phone1}) — stage: ${dup1.stage} · envíos: ${(dup1.templatesSent || []).length} · agregado: ${(dup1.createdAt || '').slice(0, 10)}`);
+    if (dup2) dups.push(`• ${dup2.name} (${phone2}) — stage: ${dup2.stage} · envíos: ${(dup2.templatesSent || []).length} · agregado: ${(dup2.createdAt || '').slice(0, 10)}`);
+    if (dups.length) {
+      await sendWhatsAppMessage(from, `⚠️ No agregué la pareja — ya hay invitados con ese teléfono:\n\n${dups.join('\n')}\n\n➡️ Revisa con *"ver invitados"* antes de decidir.`);
+      return;
+    }
+
     const coupleId = 'CP-' + Math.random().toString(16).slice(2, 8).toUpperCase();
 
     // Dividir el texto en las dos mitades usando los teléfonos como ancla
@@ -800,6 +817,13 @@ async function addGuestViaChat(from, text) {
 
   // ── INVITADO INDIVIDUAL ──
   const phone = normalizePhone(phonesRaw[0]);
+
+  // Bloqueo de duplicados: si el teléfono ya existe, NO sobrescribir
+  const existing = await getGuest(phone);
+  if (existing) {
+    await sendWhatsAppMessage(from, `⚠️ *${existing.name}* (${phone}) ya está en la lista — no lo agregué de nuevo.\n\n• Stage: ${existing.stage}\n• Invitación: ${(existing.templatesSent || []).length} envío(s)\n• Agregado: ${(existing.createdAt || '').slice(0, 10)}\n\n➡️ Revisa con *"ver invitados"* antes de decidir.`);
+    return;
+  }
 
   // Nombre = texto entre "agregar a" y el teléfono (o correo)
   let namePart = text.replace(phonesRaw[0], '').replace(/\s*\S+@\S+\s*/, ' ').trim();
@@ -1607,7 +1631,7 @@ app.post('/admin/send-from-slack', async (req, res) => {
   const { text } = req.body;
   if (!text) return res.status(400).json({ error: 'Text required (format: +569XXXXXXXX mensaje)' });
 
-  const phoneMatch = text.match(/\+?56\s*9\s*\d{4}\s*\d{4}/);
+  const phoneMatch = text.match(PHONE_RE_SINGLE);
   if (!phoneMatch) return res.status(400).json({ error: 'No phone number found. Format: +569XXXXXXXX mensaje' });
 
   const phone = normalizePhone(phoneMatch[0]);
