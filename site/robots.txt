@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /rsvp.html
+
+Sitemap: https://alejandro-kuilen.noscasamos.vip/sitemap.xml
