@@ -26,6 +26,8 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 const DATABASE_URL = process.env.DATABASE_URL || ''; // Postgres (leads + actores)
+const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN || ''; // Mercado Pago (Código Novios)
+const CN_SITE_URL = process.env.CN_SITE_URL || 'https://codigonovios.cl';
 
 const META_API = 'https://graph.facebook.com/v22.0';
 const SLACK_API = 'https://slack.com/api';
@@ -77,7 +79,63 @@ async function initPostgres() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    console.log('✅ Postgres listo — tabla leads creada/verificada');
+    await pg.query(`
+      CREATE TABLE IF NOT EXISTS cn_novios (
+        id SERIAL PRIMARY KEY,
+        slug TEXT UNIQUE NOT NULL,
+        nombre_novio TEXT,
+        nombre_novia TEXT,
+        fecha_boda DATE,
+        telefono_novio TEXT,
+        email TEXT,
+        banco TEXT,
+        tipo_cuenta TEXT,
+        numero_cuenta TEXT,
+        titular TEXT,
+        rut_titular TEXT,
+        estado TEXT DEFAULT 'activa',
+        activa_hasta DATE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pg.query(`
+      CREATE TABLE IF NOT EXISTS cn_deseos (
+        id SERIAL PRIMARY KEY,
+        novio_id INT REFERENCES cn_novios(id) ON DELETE CASCADE,
+        nombre TEXT NOT NULL,
+        descripcion TEXT,
+        foto_url TEXT,
+        precio_sugerido INT,
+        monto_total INT,
+        monto_recaudado INT DEFAULT 0,
+        estado TEXT DEFAULT 'activo',
+        orden INT DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pg.query(`
+      CREATE TABLE IF NOT EXISTS cn_regalos (
+        id SERIAL PRIMARY KEY,
+        deseo_id INT REFERENCES cn_deseos(id) ON DELETE SET NULL,
+        novio_id INT REFERENCES cn_novios(id) NOT NULL,
+        nombre_invitado TEXT,
+        mensaje TEXT,
+        monto_neto INT NOT NULL,
+        comision INT NOT NULL DEFAULT 0,
+        monto_total INT NOT NULL,
+        mp_preference_id TEXT,
+        mp_payment_id TEXT UNIQUE,
+        estado TEXT DEFAULT 'pendiente',
+        pagado_at TIMESTAMPTZ,
+        notificado_invitado BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pg.query('CREATE INDEX IF NOT EXISTS idx_cn_deseos_novio ON cn_deseos(novio_id)');
+    await pg.query('CREATE INDEX IF NOT EXISTS idx_cn_regalos_novio ON cn_regalos(novio_id)');
+    await pg.query('CREATE INDEX IF NOT EXISTS idx_cn_regalos_estado ON cn_regalos(estado)');
+    console.log('✅ Postgres listo — tablas leads + cn_* creadas/verificadas');
   } catch (err) {
     console.error('❌ Postgres init error:', err.message);
   }
@@ -1750,6 +1808,148 @@ app.get('/admin/guest-states', async (_req, res) => {
       byStage[s] = (byStage[s] || 0) + 1;
     }
     res.json({ total: guests.length, byStage, guests: guests.map(g => ({ phone: g.phone, name: g.name, stage: g.stage || 'sin_stage', templatesSent: (g.templatesSent || []).length })) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Código Novios (codigonovios.cl) — Fase C1 ───────────────
+// CORS: Bluehost (sitio estático) llama a esta API desde el browser
+app.use('/api/codigonovios', (_req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (_req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+// GET /api/codigonovios/lista/:slug — lista pública (invitados)
+app.get('/api/codigonovios/lista/:slug', async (req, res) => {
+  try {
+    const slug = (req.params.slug || '').toUpperCase().trim();
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const r = await pg.query('SELECT * FROM cn_novios WHERE slug = $1', [slug]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
+    const n = r.rows[0];
+    if (n.estado === 'pausada') return res.status(403).json({ error: 'Lista pausada' });
+    const deseos = await pg.query(
+      "SELECT id, nombre, descripcion, foto_url, precio_sugerido, monto_total, monto_recaudado FROM cn_deseos WHERE novio_id = $1 AND estado = 'activo' ORDER BY orden, id",
+      [n.id]
+    );
+    const totalRecaudado = deseos.rows.reduce((s, d) => s + (d.monto_recaudado || 0), 0);
+    res.json({
+      slug: n.slug,
+      novios: `${n.nombre_novio || ''} & ${n.nombre_novia || ''}`,
+      fecha_boda: n.fecha_boda,
+      activa_hasta: n.activa_hasta,
+      total_recaudado: totalRecaudado,
+      deseos: deseos.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/codigonovios/regalar — crea preferencia Checkout Pro (paga neto + 10%)
+app.post('/api/codigonovios/regalar', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const slug = (b.slug || '').toUpperCase().trim();
+    const montoNeto = parseInt(b.monto_neto, 10);
+    const deseoId = b.deseo_id ? parseInt(b.deseo_id, 10) : null;
+    if (!slug || !montoNeto || montoNeto < 1000) {
+      return res.status(400).json({ error: 'slug y monto_neto (>= 1000) requeridos' });
+    }
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const r = await pg.query('SELECT * FROM cn_novios WHERE slug = $1', [slug]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
+    const n = r.rows[0];
+    if (n.estado !== 'activa') return res.status(403).json({ error: 'Lista no activa' });
+    if (deseoId) {
+      const d = await pg.query('SELECT id FROM cn_deseos WHERE id = $1 AND novio_id = $2', [deseoId, n.id]);
+      if (d.rows.length === 0) return res.status(404).json({ error: 'Deseo no encontrado' });
+    }
+    const comision = Math.round(montoNeto * 0.10);
+    const montoTotal = montoNeto + comision;
+    const ins = await pg.query(
+      `INSERT INTO cn_regalos (deseo_id, novio_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pendiente') RETURNING id`,
+      [deseoId, n.id, b.nombre_invitado || null, b.mensaje || null, montoNeto, comision, montoTotal]
+    );
+    const regaloId = ins.rows[0].id;
+    if (!MP_ACCESS_TOKEN) {
+      return res.status(503).json({ error: 'Mercado Pago no configurado (MP_ACCESS_TOKEN ausente)', regalo_id: regaloId, monto_total: montoTotal });
+    }
+    // Crear preferencia Checkout Pro
+    const title = `Regalo boda ${n.nombre_novio || ''} & ${n.nombre_novia || ''}`;
+    const pref = await axios.post('https://api.mercadopago.com/checkout/preferences', {
+      items: [{ title, quantity: 1, unit_price: montoTotal }],
+      external_reference: `regalo-${regaloId}`,
+      notification_url: `${process.env.PUBLIC_URL || 'https://claw-wedding-agent-production.up.railway.app'}/api/codigonovios/webhook/mp`,
+      back_urls: {
+        success: `${CN_SITE_URL}/n/${slug}?ok=1`,
+        pending: `${CN_SITE_URL}/n/${slug}?pendiente=1`,
+        failure: `${CN_SITE_URL}/n/${slug}?fallo=1`,
+      },
+      auto_return: 'approved',
+      payment_methods: { installments: 1 },
+    }, { headers: { Authorization: `Bearer ${MP_ACCESS_TOKEN}` } });
+    await pg.query('UPDATE cn_regalos SET mp_preference_id = $1 WHERE id = $2', [pref.data.id, regaloId]);
+    res.json({ ok: true, regalo_id: regaloId, monto_neto: montoNeto, comision, monto_total: montoTotal, init_point: pref.data.init_point, preference_id: pref.data.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/codigonovios/webhook/mp — confirma pago MP (idempotente por mp_payment_id)
+app.post('/api/codigonovios/webhook/mp', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const paymentId = body.data && body.data.id;
+    if (!paymentId) return res.status(200).send('ok');
+    if (!MP_ACCESS_TOKEN || !pg) return res.status(200).send('ok');
+    const pay = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+      headers: { Authorization: `Bearer ${MP_ACCESS_TOKEN}` },
+    });
+    const p = pay.data;
+    if (p.status !== 'approved') return res.status(200).send('ok');
+    const m = (p.external_reference || '').match(/^regalo-(\d+)$/);
+    if (!m) return res.status(200).send('ok');
+    const regaloId = parseInt(m[1], 10);
+    // Idempotencia: solo marca pagado si aún no tiene este payment id
+    const up = await pg.query(
+      `UPDATE cn_regalos SET estado = 'pagado', pagado_at = NOW(), mp_payment_id = $1
+       WHERE id = $2 AND (mp_payment_id IS NULL OR mp_payment_id = $1)
+       RETURNING id, novio_id, deseo_id, monto_neto`,
+      [String(paymentId), regaloId]
+    );
+    if (up.rows.length > 0) {
+      const g = up.rows[0];
+      if (g.deseo_id) {
+        await pg.query('UPDATE cn_deseos SET monto_recaudado = monto_recaudado + $1 WHERE id = $2', [g.monto_neto, g.deseo_id]);
+      }
+      await notifySlack(`🎁 *REGALO PAGADO* (Código Novios): $${g.monto_neto.toLocaleString('es-CL')} · regalo #${g.id}`);
+      // TODO C2: avisar al novio por WhatsApp
+    }
+    res.status(200).send('ok');
+  } catch (err) {
+    console.error('MP webhook error:', err.message);
+    res.status(200).send('ok');
+  }
+});
+
+// GET /admin/cn/detalle/:slug — panel novios (regalos recibidos + total)
+app.get('/admin/cn/detalle/:slug', async (req, res) => {
+  try {
+    const slug = (req.params.slug || '').toUpperCase().trim();
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const r = await pg.query('SELECT * FROM cn_novios WHERE slug = $1', [slug]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
+    const n = r.rows[0];
+    const regalos = await pg.query('SELECT id, deseo_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado, pagado_at, created_at FROM cn_regalos WHERE novio_id = $1 ORDER BY id DESC', [n.id]);
+    const deseos = await pg.query('SELECT id, nombre, monto_total, monto_recaudado, estado FROM cn_deseos WHERE novio_id = $1 ORDER BY orden, id', [n.id]);
+    const totalPagado = regalos.rows.filter(g => g.estado === 'pagado').reduce((s, g) => s + g.monto_neto, 0);
+    res.json({ novio: n, deseos: deseos.rows, regalos: regalos.rows, total_pagado: totalPagado });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
