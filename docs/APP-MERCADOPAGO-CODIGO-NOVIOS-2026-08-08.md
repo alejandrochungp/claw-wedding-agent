@@ -44,12 +44,14 @@ Se creó la aplicación **"Codigo Novios"** en Mercado Pago (cuenta **Aconcagua 
 ### 2.4 Activación de credenciales de prueba (sandbox)
 - Ruta: `app/{id}/credentials/sandbox` → "Activar credenciales" → formulario (País: Chile + términos) → **reCAPTCHA** (misma técnica de click real) → **segunda verificación telefónica** (código 360951) → credenciales TEST visibles.
 
-### 2.5 Credenciales de PRODUCCIÓN — BLOQUEADO
-- Ruta: `app/{id}/credentials/production` → pide completar **datos del negocio**:
-  - **Industria** (dropdown "Selecciona una industria") — componente React anti-bot: NO registra selección ni con click real por coordenadas ni con teclado (Home + ArrowDown×11 + Enter). **Requiere click manual de Alejandro.**
-  - Sitio web (input) — sí automatizable: `https://codigonovios.cl`
-  - Checkbox términos + botón "Activar credenciales de producción"
-- Además la **cuenta MP está en espera de validación** (Alejandro la creó y MP la está validando) — los payouts no funcionarán hasta eso.
+## 2.5 Credenciales de PRODUCCIÓN — ✅ ACTIVADAS (08-Ago 18:20)
+- El formulario de negocio (industria + sitio web) se completó: Alejandro hizo el **click manual en el dropdown** de industria ("Servicio de informática") — la automatización no puede (componente React anti-bot). Yo completé sitio web + términos + activar.
+- **Cuenta bancaria registrada** (desbloquea payouts): Aconcagua Capital SpA · Banco de Chile · Cta. Cte. `00-178-14524-06` → `.secrets/aconcagua_banco_chile.txt`
+- **3ª verificación telefónica** (código 749092) al entrar a producción
+- **Credenciales de producción obtenidas** → `.secrets/wedding_mp_credentials.txt`:
+  - Access Token: `APP_USR-1134622622996165-080814-3c1cd2b7545d41336108b5f984245b36-3596223585`
+  - Public Key: `APP_USR-87ab2a04-64a4-4975-a1c2-491bb8b9ac31` · Client ID: `1134622622996165` · Client Secret: `LCbUi4xwwyrA1Q3g59cf1ZoSV7fTtUll`
+- **MP_ACCESS_TOKEN actualizado en Railway** al token de producción (verificado en variables) — smoke test OK (preferencia Checkout Pro real creada)
 
 ---
 
@@ -101,8 +103,11 @@ Se creó la aplicación **"Codigo Novios"** en Mercado Pago (cuenta **Aconcagua 
 - `tmp/mp_extract_creds.py` → extracción final de credenciales
 
 ## 6. Pendientes
-- [ ] **Token test en Railway** (`MP_ACCESS_TOKEN` = token TEST) para probar flujo sandbox end-to-end
-- [ ] **Lista piloto `ALEJKUIL`** con deseos reales (luna de miel, etc.) en cn_novios/cn_deseos
-- [ ] **Página pública** `codigonovios.cl/n/ALEJKUIL` en Bluehost (HTML+JS → API Railway)
-- [ ] **Credenciales de producción**: click manual de Alejandro en dropdown industria + esperar validación MP
-- [ ] Webhook MP probado con compra simulada (TESTUSER)
+- [x] ~~Token test en Railway~~ → **MP_ACCESS_TOKEN de PRODUCCIÓN seteado** ✅
+- [x] ~~Lista piloto ALEJKUIL~~ → creada con 3 deseos ✅
+- [x] ~~Página pública codigonovios.cl/n/{slug}~~ → n.php + rewrite desplegado ✅
+- [x] ~~Credenciales de producción~~ → ACTIVADAS (click manual industria + banco + validaciones) ✅
+- [x] ~~Webhook MP probado~~ → preferencia Checkout Pro real creada (regalos 1 y 3 de prueba quedaron "pendiente" en BD)
+- [ ] Probar pago completo con TESTUSER (comprar con tarjeta de prueba hasta webhook → estado pagado)
+- [ ] Limpiar regalos de prueba (regalo_id 1 y 3) cuando haya endpoint de admin para ello
+- [ ] F2: carta formal con código ALEJKUIL · F3: recordatorios
