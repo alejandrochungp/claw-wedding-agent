@@ -1955,6 +1955,52 @@ app.get('/admin/cn/detalle/:slug', async (req, res) => {
   }
 });
 
+// POST /admin/cn/setup — crear/actualizar lista piloto + deseos (idempotente, C1)
+app.post('/admin/cn/setup', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const slug = (b.slug || 'ALEJKUIL').toUpperCase().trim();
+    const deseos = Array.isArray(b.deseos) ? b.deseos : [];
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    // Upsert novios
+    const up = await pg.query(`
+      INSERT INTO cn_novios (slug, nombre_novio, nombre_novia, fecha_boda, telefono_novio, email, estado, activa_hasta)
+      VALUES ($1,$2,$3,$4,$5,$6,'activa',$7)
+      ON CONFLICT (slug) DO UPDATE SET nombre_novio = EXCLUDED.nombre_novio, nombre_novia = EXCLUDED.nombre_novia,
+        fecha_boda = EXCLUDED.fecha_boda, telefono_novio = EXCLUDED.telefono_novio, email = EXCLUDED.email,
+        estado = 'activa', activa_hasta = EXCLUDED.activa_hasta, updated_at = NOW()
+      RETURNING id, slug
+    `, [
+      slug,
+      b.nombre_novio || null,
+      b.nombre_novia || null,
+      b.fecha_boda || null,
+      b.telefono_novio || null,
+      b.email || null,
+      b.activa_hasta || null
+    ]);
+    const novioId = up.rows[0].id;
+    // Insertar deseos faltantes (solo si trae lista y no existen ya)
+    let insertados = 0;
+    if (deseos.length > 0) {
+      const existing = await pg.query('SELECT nombre FROM cn_deseos WHERE novio_id = $1', [novioId]);
+      const existentes = new Set(existing.rows.map(d => d.nombre));
+      for (let i = 0; i < deseos.length; i++) {
+        const d = deseos[i];
+        if (existentes.has(d.nombre)) continue;
+        await pg.query(
+          'INSERT INTO cn_deseos (novio_id, nombre, descripcion, foto_url, precio_sugerido, monto_total, orden) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+          [novioId, d.nombre, d.descripcion || null, d.foto_url || null, d.precio_sugerido || null, d.monto_total || null, i + 1]
+        );
+        insertados++;
+      }
+    }
+    res.json({ ok: true, novio_id: novioId, slug, deseos_insertados: insertados });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ───────────────────────────────────────────────────
 async function start() {
   try {
