@@ -391,7 +391,7 @@ app.post('/slack/events', async (req, res) => {
   }
 });
 
-// ── Slack Message Handler (Slack → WhatsApp) ─────���───────────
+// ───────────────────── Slack Message Handler (Slack → WhatsApp) ─────────────────────
 async function resolvePhoneFromThread(thread_ts, channel) {
   // 1. Buscar en el mapa phoneToThread (Redis) por thread_ts
   try {
