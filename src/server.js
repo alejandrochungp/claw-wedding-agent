@@ -2207,7 +2207,7 @@ app.post('/api/codigonovios/admin/regalos', requireAdminToken, async (req, res) 
       if (regalo.estado === 'pagado' && regalo.deseo_id) {
         await pg.query('UPDATE cn_deseos SET monto_recaudado = GREATEST(0, monto_recaudado - $1) WHERE id = $2', [regalo.monto_neto, regalo.deseo_id]);
       }
-      await pg.query("UPDATE cn_regalos SET estado = 'reembolsado', updated_at = NOW() WHERE id = $1", [regaloId]);
+      await pg.query("UPDATE cn_regalos SET estado = 'reembolsado' WHERE id = $1", [regaloId]);
       return res.json({ ok: true, estado: 'reembolsado' });
     }
 
