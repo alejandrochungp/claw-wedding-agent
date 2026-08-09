@@ -2084,7 +2084,7 @@ app.get('/api/codigonovios/admin/panel', requireAdminToken, async (req, res) => 
     const r = await pg.query('SELECT id, slug, nombre_novio, nombre_novia, fecha_boda, telefono_novio, email, estado, activa_hasta, created_at FROM cn_novios WHERE slug = $1', [slug]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
     const n = r.rows[0];
-    const regalos = await pg.query('SELECT id, deseo_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado, pagado_at, created_at FROM cn_regalos WHERE novio_id = $1 ORDER BY id DESC', [n.id]);
+    const regalos = await pg.query('SELECT id, deseo_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, mp_payment_id, estado, pagado_at, created_at FROM cn_regalos WHERE novio_id = $1 ORDER BY id DESC', [n.id]);
     const deseos = await pg.query('SELECT id, nombre, descripcion, foto_url, precio_sugerido, monto_total, monto_recaudado, estado, orden FROM cn_deseos WHERE novio_id = $1 ORDER BY orden, id', [n.id]);
     const totalPagado = regalos.rows.filter(g => g.estado === 'pagado').reduce((s, g) => s + g.monto_neto, 0);
     const totalMeta = deseos.rows.reduce((s, d) => s + (d.monto_total || d.precio_sugerido || 0), 0);
