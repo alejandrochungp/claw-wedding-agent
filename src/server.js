@@ -28,6 +28,7 @@ const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 const DATABASE_URL = process.env.DATABASE_URL || ''; // Postgres (leads + actores)
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN || ''; // Mercado Pago (Código Novios)
 const CN_SITE_URL = process.env.CN_SITE_URL || 'https://codigonovios.cl';
+const CN_ADMIN_SECRET = process.env.CN_ADMIN_SECRET || 'cn_admin_secret_2026'; // firma tokens panel novios
 
 const META_API = 'https://graph.facebook.com/v22.0';
 const SLACK_API = 'https://slack.com/api';
@@ -93,12 +94,15 @@ async function initPostgres() {
         numero_cuenta TEXT,
         titular TEXT,
         rut_titular TEXT,
+        password_hash TEXT,
         estado TEXT DEFAULT 'activa',
         activa_hasta DATE,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    // Migración idempotente: tabla ya existente sin password_hash
+    await pg.query('ALTER TABLE cn_novios ADD COLUMN IF NOT EXISTS password_hash TEXT');
     await pg.query(`
       CREATE TABLE IF NOT EXISTS cn_deseos (
         id SERIAL PRIMARY KEY,
@@ -1964,10 +1968,11 @@ app.post('/admin/cn/setup', async (req, res) => {
     if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
     // Upsert novios
     const up = await pg.query(`
-      INSERT INTO cn_novios (slug, nombre_novio, nombre_novia, fecha_boda, telefono_novio, email, estado, activa_hasta)
-      VALUES ($1,$2,$3,$4,$5,$6,'activa',$7)
+      INSERT INTO cn_novios (slug, nombre_novio, nombre_novia, fecha_boda, telefono_novio, email, password_hash, estado, activa_hasta)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'activa',$8)
       ON CONFLICT (slug) DO UPDATE SET nombre_novio = EXCLUDED.nombre_novio, nombre_novia = EXCLUDED.nombre_novia,
         fecha_boda = EXCLUDED.fecha_boda, telefono_novio = EXCLUDED.telefono_novio, email = EXCLUDED.email,
+        password_hash = COALESCE(EXCLUDED.password_hash, cn_novios.password_hash),
         estado = 'activa', activa_hasta = EXCLUDED.activa_hasta, updated_at = NOW()
       RETURNING id, slug
     `, [
@@ -1977,6 +1982,7 @@ app.post('/admin/cn/setup', async (req, res) => {
       b.fecha_boda || null,
       b.telefono_novio || null,
       b.email || null,
+      b.password ? hashPassword(b.password) : null,
       b.activa_hasta || null
     ]);
     const novioId = up.rows[0].id;
@@ -1996,6 +2002,172 @@ app.post('/admin/cn/setup', async (req, res) => {
       }
     }
     res.json({ ok: true, novio_id: novioId, slug, deseos_insertados: insertados });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Panel Novios Web (codigonovios.cl/admin.php) — Fase A ───────────
+const crypto = require('crypto');
+
+// Hash de contraseña con scrypt (Node nativo, sin dependencias)
+function hashPassword(pass) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(pass, salt, 32).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(pass, stored) {
+  if (!stored || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  const test = crypto.scryptSync(pass, salt, 32).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(test, 'hex'));
+}
+
+// Token HMAC: slug + expiración, firmado con CN_ADMIN_SECRET
+function makeAdminToken(slug) {
+  const exp = Date.now() + 24 * 3600 * 1000; // 24h
+  const payload = `${slug}.${exp}`;
+  const sig = crypto.createHmac('sha256', CN_ADMIN_SECRET).update(payload).digest('hex');
+  return Buffer.from(`${payload}.${sig}`).toString('base64url');
+}
+
+function verifyAdminToken(token, slug) {
+  try {
+    const decoded = Buffer.from(token, 'base64url').toString();
+    const [tokSlug, expStr, sig] = decoded.split('.');
+    if (tokSlug !== slug) return false;
+    if (Date.now() > parseInt(expStr, 10)) return false;
+    const expected = crypto.createHmac('sha256', CN_ADMIN_SECRET).update(`${tokSlug}.${expStr}`).digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'));
+  } catch (e) {
+    return false;
+  }
+}
+
+// Middleware: valida token del panel novios
+function requireAdminToken(req, res, next) {
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const slug = ((req.body && req.body.slug) || req.query.slug || '').toUpperCase().trim();
+  if (!token || !slug || !verifyAdminToken(token, slug)) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  next();
+}
+
+// POST /api/codigonovios/admin/login — valida contraseña y entrega token 24h
+app.post('/api/codigonovios/admin/login', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const slug = (b.slug || '').toUpperCase().trim();
+    const pass = b.password || '';
+    if (!slug || !pass) return res.status(400).json({ error: 'slug y password requeridos' });
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const r = await pg.query('SELECT password_hash FROM cn_novios WHERE slug = $1', [slug]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
+    if (!r.rows[0].password_hash) return res.status(403).json({ error: 'Esta lista no tiene contraseña configurada' });
+    if (!verifyPassword(pass, r.rows[0].password_hash)) {
+      return res.status(401).json({ error: 'Contraseña incorrecta' });
+    }
+    res.json({ ok: true, token: makeAdminToken(slug), slug });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/codigonovios/admin/panel — novio + deseos + regalos (token)
+app.get('/api/codigonovios/admin/panel', requireAdminToken, async (req, res) => {
+  try {
+    const slug = (req.query.slug || '').toUpperCase().trim();
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const r = await pg.query('SELECT id, slug, nombre_novio, nombre_novia, fecha_boda, telefono_novio, email, estado, activa_hasta, created_at FROM cn_novios WHERE slug = $1', [slug]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
+    const n = r.rows[0];
+    const regalos = await pg.query('SELECT id, deseo_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado, pagado_at, created_at FROM cn_regalos WHERE novio_id = $1 ORDER BY id DESC', [n.id]);
+    const deseos = await pg.query('SELECT id, nombre, descripcion, foto_url, precio_sugerido, monto_total, monto_recaudado, estado, orden FROM cn_deseos WHERE novio_id = $1 ORDER BY orden, id', [n.id]);
+    const totalPagado = regalos.rows.filter(g => g.estado === 'pagado').reduce((s, g) => s + g.monto_neto, 0);
+    const totalMeta = deseos.rows.reduce((s, d) => s + (d.monto_total || d.precio_sugerido || 0), 0);
+    res.json({ novio: n, deseos: deseos.rows, regalos: regalos.rows, total_pagado: totalPagado, total_meta: totalMeta });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/codigonovios/admin/deseos — crear/editar/ocultar/activar (token)
+app.post('/api/codigonovios/admin/deseos', requireAdminToken, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const slug = (b.slug || '').toUpperCase().trim();
+    const accion = b.accion || '';
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const nr = await pg.query('SELECT id FROM cn_novios WHERE slug = $1', [slug]);
+    if (nr.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
+    const novioId = nr.rows[0].id;
+
+    if (accion === 'crear') {
+      const nombre = (b.nombre || '').trim();
+      if (!nombre) return res.status(400).json({ error: 'nombre requerido' });
+      const ins = await pg.query(
+        'INSERT INTO cn_deseos (novio_id, nombre, descripcion, foto_url, precio_sugerido, monto_total, orden) VALUES ($1,$2,$3,$4,$5,$6, COALESCE((SELECT MAX(orden)+1 FROM cn_deseos WHERE novio_id=$1),1)) RETURNING id',
+        [novioId, nombre, b.descripcion || null, b.foto_url || null, b.precio_sugerido || null, b.monto_total || null]
+      );
+      return res.json({ ok: true, deseo_id: ins.rows[0].id });
+    }
+
+    const deseoId = parseInt(b.deseo_id, 10);
+    if (!deseoId) return res.status(400).json({ error: 'deseo_id requerido' });
+    const d = await pg.query('SELECT id FROM cn_deseos WHERE id = $1 AND novio_id = $2', [deseoId, novioId]);
+    if (d.rows.length === 0) return res.status(404).json({ error: 'Deseo no encontrado' });
+
+    if (accion === 'editar') {
+      await pg.query(
+        'UPDATE cn_deseos SET nombre=$1, descripcion=$2, foto_url=$3, precio_sugerido=$4, monto_total=$5 WHERE id=$6',
+        [b.nombre || null, b.descripcion !== undefined ? b.descripcion : null, b.foto_url !== undefined ? b.foto_url : null, b.precio_sugerido || null, b.monto_total || null, deseoId]
+      );
+      return res.json({ ok: true });
+    }
+    if (accion === 'ocultar' || accion === 'activar') {
+      const estado = accion === 'ocultar' ? 'oculto' : 'activo';
+      await pg.query('UPDATE cn_deseos SET estado = $1 WHERE id = $2', [estado, deseoId]);
+      return res.json({ ok: true, estado });
+    }
+    if (accion === 'eliminar') {
+      await pg.query('DELETE FROM cn_deseos WHERE id = $1', [deseoId]);
+      return res.json({ ok: true });
+    }
+    res.status(400).json({ error: 'accion inválida (crear/editar/ocultar/activar/eliminar)' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/codigonovios/admin/novios — editar datos de la lista (token)
+app.put('/api/codigonovios/admin/novios', requireAdminToken, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const slug = (b.slug || '').toUpperCase().trim();
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    await pg.query(
+      `UPDATE cn_novios SET nombre_novio=$1, nombre_novia=$2, fecha_boda=$3, telefono_novio=$4, email=$5, updated_at=NOW() WHERE slug=$6`,
+      [b.nombre_novio || null, b.nombre_novia || null, b.fecha_boda || null, b.telefono_novio || null, b.email || null, slug]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/codigonovios/admin/password — cambiar contraseña (token)
+app.put('/api/codigonovios/admin/password', requireAdminToken, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const slug = (b.slug || '').toUpperCase().trim();
+    const nueva = (b.password || '').trim();
+    if (nueva.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    await pg.query('UPDATE cn_novios SET password_hash = $1, updated_at = NOW() WHERE slug = $2', [hashPassword(nueva), slug]);
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
