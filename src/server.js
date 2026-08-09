@@ -2173,6 +2173,42 @@ app.put('/api/codigonovios/admin/password', requireAdminToken, async (req, res) 
   }
 });
 
+// POST /api/codigonovios/admin/regalos — eliminar regalos de prueba/errores (token)
+app.post('/api/codigonovios/admin/regalos', requireAdminToken, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const slug = (b.slug || '').toUpperCase().trim();
+    const accion = b.accion || '';
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const nr = await pg.query('SELECT id FROM cn_novios WHERE slug = $1', [slug]);
+    if (nr.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
+    const novioId = nr.rows[0].id;
+
+    if (accion === 'eliminar') {
+      const regaloId = parseInt(b.regalo_id, 10);
+      if (!regaloId) return res.status(400).json({ error: 'regalo_id requerido' });
+      const g = await pg.query('SELECT id, deseo_id, monto_neto, estado FROM cn_regalos WHERE id = $1 AND novio_id = $2', [regaloId, novioId]);
+      if (g.rows.length === 0) return res.status(404).json({ error: 'Regalo no encontrado' });
+      const regalo = g.rows[0];
+      // Si estaba pagado, restar del monto_recaudado del deseo
+      if (regalo.estado === 'pagado' && regalo.deseo_id) {
+        await pg.query('UPDATE cn_deseos SET monto_recaudado = GREATEST(0, monto_recaudado - $1) WHERE id = $2', [regalo.monto_neto, regalo.deseo_id]);
+      }
+      await pg.query('DELETE FROM cn_regalos WHERE id = $1', [regaloId]);
+      return res.json({ ok: true });
+    }
+
+    if (accion === 'eliminar-pendientes') {
+      const del = await pg.query('DELETE FROM cn_regalos WHERE novio_id = $1 AND estado = \'pendiente\' RETURNING id', [novioId]);
+      return res.json({ ok: true, eliminados: del.rows.length });
+    }
+
+    res.status(400).json({ error: 'accion inválida (eliminar / eliminar-pendientes)' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ───────────────────────────────────────────────────
 async function start() {
   try {
