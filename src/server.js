@@ -2198,6 +2198,19 @@ app.post('/api/codigonovios/admin/regalos', requireAdminToken, async (req, res) 
       return res.json({ ok: true });
     }
 
+    if (accion === 'reembolsar') {
+      const regaloId = parseInt(b.regalo_id, 10);
+      if (!regaloId) return res.status(400).json({ error: 'regalo_id requerido' });
+      const g = await pg.query('SELECT id, deseo_id, monto_neto, estado FROM cn_regalos WHERE id = $1 AND novio_id = $2', [regaloId, novioId]);
+      if (g.rows.length === 0) return res.status(404).json({ error: 'Regalo no encontrado' });
+      const regalo = g.rows[0];
+      if (regalo.estado === 'pagado' && regalo.deseo_id) {
+        await pg.query('UPDATE cn_deseos SET monto_recaudado = GREATEST(0, monto_recaudado - $1) WHERE id = $2', [regalo.monto_neto, regalo.deseo_id]);
+      }
+      await pg.query("UPDATE cn_regalos SET estado = 'reembolsado', updated_at = NOW() WHERE id = $1", [regaloId]);
+      return res.json({ ok: true, estado: 'reembolsado' });
+    }
+
     if (accion === 'eliminar-pendientes') {
       const del = await pg.query('DELETE FROM cn_regalos WHERE novio_id = $1 AND estado = \'pendiente\' RETURNING id', [novioId]);
       return res.json({ ok: true, eliminados: del.rows.length });
