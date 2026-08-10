@@ -164,7 +164,10 @@ form.contact-form { display: flex; flex-direction: column; gap: 14px; background
   gap: 44px; flex-wrap: wrap; padding: 18px 0 6px;
 }
 .logos-row img {
-  height: 34px; width: auto;
+  max-height: 28px;
+  max-width: 110px;
+  height: auto;
+  width: auto;
   filter: grayscale(1) contrast(1.05);
   opacity: .72;
   transition: opacity .2s, filter .2s;
@@ -173,7 +176,7 @@ form.contact-form { display: flex; flex-direction: column; gap: 14px; background
 .logos-note { text-align: center; font-size: .85rem; opacity: .6; margin-top: 16px; }
 @media (max-width: 820px) {
   .logos-row { gap: 26px; }
-  .logos-row img { height: 26px; }
+  .logos-row img { max-height: 22px; max-width: 90px; }
 }
 
 /* ---------- WhatsApp float ---------- */
