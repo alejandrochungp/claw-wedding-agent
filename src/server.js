@@ -1808,9 +1808,11 @@ app.post('/admin/rsvps/repair', async (_req, res) => {
         const cTel = telefono.replace(/[^\d]/g, '');
         if (rTel === cTel && r.notas === 'Form micrositio') {
           const antes = r.acompanantes;
-          if (antes === '0' && acomp !== '0') {
-            r.acompanantes = acomp;
-            corregidos.push({ telefono: cTel, nombre: r.nombre, antes, ahora: acomp });
+          // normalizar SIEMPRE desde el texto original (re-parse con parser corregido)
+          const nuevo = parseRsvpForm(text).acompanantes || '0';
+          if (String(antes) !== String(nuevo)) {
+            r.acompanantes = nuevo;
+            corregidos.push({ telefono: cTel, nombre: r.nombre, antes, ahora: nuevo });
           }
         }
       }
