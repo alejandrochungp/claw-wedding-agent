@@ -676,28 +676,39 @@ async function notifyNoviosRsvp(d, status) {
         console.log(`📨 RSVP notificado a novio ${phone} (ventana 24h)`);
       } else {
         // sin ventana → plantilla aviso_rsvp_novios_v2 (incluye mensaje del invitado; si no hay mensaje → "—")
+        // fallback a v1 (aprobada) si la v2 aún está PENDING
         const msgParam = d.mensaje && d.mensaje.trim() ? d.mensaje.trim() : '—';
-        await axios.post(`${META_API}/${PHONE_NUMBER_ID}/messages`, {
-          messaging_product: 'whatsapp',
-          to: phone,
-          type: 'template',
-          template: {
-            name: 'aviso_rsvp_novios_v2',
-            language: { code: 'es' },
-            components: [{
-              type: 'body',
-              parameters: [
-                { type: 'text', text: d.nombre || 'Invitado' },
-                { type: 'text', text: status },
-                { type: 'text', text: String(d.acompanantes || '0') },
-                { type: 'text', text: msgParam },
-              ],
-            }],
-          },
-        }, {
-          headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
-        });
-        console.log(`📨 RSVP notificado a novio ${phone} (plantilla aviso_rsvp_novios_v2)`);
+        const sendTpl = async (tplName, params) => {
+          return axios.post(`${META_API}/${PHONE_NUMBER_ID}/messages`, {
+            messaging_product: 'whatsapp',
+            to: phone,
+            type: 'template',
+            template: {
+              name: tplName,
+              language: { code: 'es' },
+              components: [{ type: 'body', parameters: params }],
+            },
+          }, {
+            headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+          });
+        };
+        try {
+          await sendTpl('aviso_rsvp_novios_v2', [
+            { type: 'text', text: d.nombre || 'Invitado' },
+            { type: 'text', text: status },
+            { type: 'text', text: String(d.acompanantes || '0') },
+            { type: 'text', text: msgParam },
+          ]);
+          console.log(`📨 RSVP notificado a novio ${phone} (plantilla aviso_rsvp_novios_v2)`);
+        } catch (errV2) {
+          // fallback: v1 aprobada (sin mensaje) mientras v2 no esté APPROVED
+          await sendTpl('aviso_rsvp_novios', [
+            { type: 'text', text: d.nombre || 'Invitado' },
+            { type: 'text', text: status },
+            { type: 'text', text: String(d.acompanantes || '0') },
+          ]);
+          console.log(`📨 RSVP notificado a novio ${phone} (fallback plantilla aviso_rsvp_novios)`);
+        }
       }
     } catch (err) {
       console.error(`notifyNoviosRsvp → ${phone}:`, err.response?.data?.error?.message || err.message);
