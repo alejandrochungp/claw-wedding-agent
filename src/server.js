@@ -675,13 +675,14 @@ async function notifyNoviosRsvp(d, status) {
         await sendWhatsAppMessage(phone, texto);
         console.log(`📨 RSVP notificado a novio ${phone} (ventana 24h)`);
       } else {
-        // sin ventana → plantilla aviso_rsvp_novios (si aprobada; si no, log silencioso)
+        // sin ventana → plantilla aviso_rsvp_novios_v2 (incluye mensaje del invitado; si no hay mensaje → "—")
+        const msgParam = d.mensaje && d.mensaje.trim() ? d.mensaje.trim() : '—';
         await axios.post(`${META_API}/${PHONE_NUMBER_ID}/messages`, {
           messaging_product: 'whatsapp',
           to: phone,
           type: 'template',
           template: {
-            name: 'aviso_rsvp_novios',
+            name: 'aviso_rsvp_novios_v2',
             language: { code: 'es' },
             components: [{
               type: 'body',
@@ -689,13 +690,14 @@ async function notifyNoviosRsvp(d, status) {
                 { type: 'text', text: d.nombre || 'Invitado' },
                 { type: 'text', text: status },
                 { type: 'text', text: String(d.acompanantes || '0') },
+                { type: 'text', text: msgParam },
               ],
             }],
           },
         }, {
           headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
         });
-        console.log(`📨 RSVP notificado a novio ${phone} (plantilla aviso_rsvp_novios)`);
+        console.log(`📨 RSVP notificado a novio ${phone} (plantilla aviso_rsvp_novios_v2)`);
       }
     } catch (err) {
       console.error(`notifyNoviosRsvp → ${phone}:`, err.response?.data?.error?.message || err.message);
