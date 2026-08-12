@@ -580,16 +580,30 @@ function parseRsvpForm(text) {
     const m = text.match(re);
     return m ? m[1].trim() : null;
   };
-  return {
+  const parsed = {
     nombre: get(/👤\s*([^\n]+)/),
     phone: get(/📱\s*([^\n]+)/),
     // Labels tolerantes a typos (asistensia/asitencia → asist\w*) y a ñ (Acompañantes/Acompanantes)
     asistencia: get(/asist\w*\s*:\s*([^\n]+)/i),
-    acompanantes: get(/acompa[nñ]antes?\s*:\s*([^\n]+)/i),
+    acompanantesRaw: get(/acompa[nñ]antes?\s*:\s*([^\n]+)/i),
     restricciones: get(/restric\w*\s*:\s*([^\n]+)/i),
     estacionamiento: get(/estacion\w*\s*:\s*([^\n]+)/i),
     mensaje: get(/💌\s*mensaj\w*\s*:\s*([^\n]+)/i),
   };
+  // normalizar acompañantes: solo dígitos, máximo 5 (form permite 0-5; typos tipo 550/05 → primer dígito)
+  if (parsed.acompanantesRaw != null) {
+    const m = parsed.acompanantesRaw.match(/\d+/);
+    if (m) {
+      const n = parseInt(m[0], 10);
+      parsed.acompanantes = n > 5 ? m[0][0] : String(n);
+    } else {
+      parsed.acompanantes = '0';
+    }
+  } else {
+    parsed.acompanantes = '0';
+  }
+  delete parsed.acompanantesRaw;
+  return parsed;
 }
 
 async function handleRsvpFormMessage(from, text) {
