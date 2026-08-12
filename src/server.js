@@ -583,9 +583,9 @@ function parseRsvpForm(text) {
   return {
     nombre: get(/👤\s*([^\n]+)/),
     phone: get(/📱\s*([^\n]+)/),
-    // Labels tolerantes a typos (asistensia/asitencia → asist\w*)
+    // Labels tolerantes a typos (asistensia/asitencia → asist\w*) y a ñ (Acompañantes/Acompanantes)
     asistencia: get(/asist\w*\s*:\s*([^\n]+)/i),
-    acompanantes: get(/acompa\w*\s*:\s*([^\n]+)/i),
+    acompanantes: get(/acompa[nñ]antes?\s*:\s*([^\n]+)/i),
     restricciones: get(/restric\w*\s*:\s*([^\n]+)/i),
     estacionamiento: get(/estacion\w*\s*:\s*([^\n]+)/i),
     mensaje: get(/💌\s*mensaj\w*\s*:\s*([^\n]+)/i),
@@ -629,6 +629,9 @@ async function handleRsvpFormMessage(from, text) {
 
   await notifySlack(`🎉 *RSVP FORM* \`${from}\`: ${status}${d.nombre ? ` — ${d.nombre}` : ''}${d.acompanantes && d.acompanantes !== '0' ? ` (${d.acompanantes} acompañantes)` : ''}`);
 
+  // Avisar a los novios (ventana 24h → texto libre; si no hay ventana → plantilla)
+  await notifyNoviosRsvp(d, status);
+
   // Respuesta de confirmación al remitente
   const reply = status.includes('Confirmado')
     ? `¡Gracias por confirmar${d.nombre ? `, ${d.nombre}` : ''}! 🎉 Nos vemos el 17 de noviembre. 📅 Agrega el evento a tu calendario: ${TENANT.calendarUrl}`
@@ -636,6 +639,54 @@ async function handleRsvpFormMessage(from, text) {
       ? 'Gracias por avisarnos, lo entendemos completamente 🫶 Te tendremos presente ese día.'
       : '¡Gracias por tu respuesta! 🤔 Si luego decides venir, solo escríbenos "sí, voy".';
   await sendWhatsAppMessage(from, reply);
+}
+
+// ── Notificación a novios al recibir RSVP (11-Ago-2026) ────────
+async function notifyNoviosRsvp(d, status) {
+  const texto = `🎉 Nueva confirmación de asistencia:\n${d.nombre ? `👤 ${d.nombre}\n` : ''}${status}\n👥 Acompañantes: ${d.acompanantes || '0'}${d.mensaje ? `\n💌 ${d.mensaje}` : ''}`;
+  for (const phone of TENANT.noviosPhones) {
+    try {
+      // ventana 24h: ¿el novio interactuó con el bot recientemente?
+      let ventana = false;
+      try {
+        const conv = await redis.hget(CONVERSATION_KEY, `wa:${phone}`);
+        if (conv) {
+          const c = JSON.parse(conv);
+          if (c.timestamp) {
+            ventana = (Date.now() - new Date(c.timestamp).getTime()) < 24 * 3600 * 1000;
+          }
+        }
+      } catch (e) { /* sin conversación = sin ventana */ }
+      if (ventana) {
+        await sendWhatsAppMessage(phone, texto);
+        console.log(`📨 RSVP notificado a novio ${phone} (ventana 24h)`);
+      } else {
+        // sin ventana → plantilla aviso_rsvp_novios (si aprobada; si no, log silencioso)
+        await axios.post(`${META_API}/${PHONE_NUMBER_ID}/messages`, {
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'template',
+          template: {
+            name: 'aviso_rsvp_novios',
+            language: { code: 'es' },
+            components: [{
+              type: 'body',
+              parameters: [
+                { type: 'text', text: d.nombre || 'Invitado' },
+                { type: 'text', text: status },
+                { type: 'text', text: String(d.acompanantes || '0') },
+              ],
+            }],
+          },
+        }, {
+          headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+        });
+        console.log(`📨 RSVP notificado a novio ${phone} (plantilla aviso_rsvp_novios)`);
+      }
+    } catch (err) {
+      console.error(`notifyNoviosRsvp → ${phone}:`, err.response?.data?.error?.message || err.message);
+    }
+  }
 }
 
 // ── Novio Commands (Fase 2 + G1/G2 + Parejas) ────────────────
@@ -1716,6 +1767,46 @@ app.get('/admin/rsvps', async (_req, res) => {
     const entries = await redis.lrange(RSVP_KEY, 0, -1);
     const rsvps = entries.map(e => JSON.parse(e));
     res.json({ total: rsvps.length, rsvps });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /admin/rsvps/repair — corrige acompañantes históricos (bug ñ en parser, 11-ago-2026)
+app.post('/admin/rsvps/repair', async (_req, res) => {
+  try {
+    const all = await redis.hgetall(CONVERSATION_KEY);
+    const entries = await redis.lrange(RSVP_KEY, 0, -1);
+    const rsvps = entries.map(e => JSON.parse(e));
+    const corregidos = [];
+    // recorrer conversaciones con form RSVP y re-parsear con el parser corregido
+    for (const [key, value] of Object.entries(all)) {
+      if (!key.startsWith('wa:')) continue;
+      const conv = JSON.parse(value);
+      const text = conv.lastMessage || '';
+      if (!text.includes('Confirmo mi asistencia')) continue;
+      const d = parseRsvpForm(text);
+      const acomp = d.acompanantes || '0';
+      const telefono = key.slice(3);
+      // buscar el RSVP de ese teléfono y actualizar acompañantes
+      for (const r of rsvps) {
+        const rTel = (r.telefono || '').replace(/[^\d]/g, '');
+        const cTel = telefono.replace(/[^\d]/g, '');
+        if (rTel === cTel && r.notas === 'Form micrositio') {
+          const antes = r.acompanantes;
+          if (antes === '0' && acomp !== '0') {
+            r.acompanantes = acomp;
+            corregidos.push({ telefono: cTel, nombre: r.nombre, antes, ahora: acomp });
+          }
+        }
+      }
+    }
+    // reescribir la lista completa en Redis
+    await redis.del(RSVP_KEY);
+    for (const r of rsvps) {
+      await redis.rpush(RSVP_KEY, JSON.stringify(r));
+    }
+    res.json({ ok: true, corregidos: corregidos.length, detalle: corregidos });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
