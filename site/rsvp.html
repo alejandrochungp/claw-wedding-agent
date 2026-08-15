@@ -34,6 +34,7 @@
 
     <label for="guests">N° de acompañantes</label>
     <input type="number" id="guests" name="guests" min="0" max="5" value="0">
+    <p id="cupo-note" style="margin:4px 0 0; font-size:.85rem; color:#8B3232; display:none;"></p>
 
     <label for="diet">Restricciones alimentarias</label>
     <textarea id="diet" name="diet" rows="2" placeholder="Alergias, vegetariano, etc. (opcional)"></textarea>
@@ -59,11 +60,42 @@
 <a class="wa-float" href="https://wa.me/56994635497" target="_blank" aria-label="WhatsApp">💬</a>
 
 <script>
+var CUPO_FIXED = null;
+
+// Prefill por teléfono: si la URL trae ?phone=, consultamos el cupo asignado al backend
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  var phoneParam = params.get('phone');
+  if (!phoneParam) return;
+
+  var nameEl = document.getElementById('name');
+  var phoneEl = document.getElementById('phone');
+  var guestsEl = document.getElementById('guests');
+  var cupoNote = document.getElementById('cupo-note');
+
+  fetch('https://claw-wedding-agent-production.up.railway.app/api/rsvp/guest?phone=' + encodeURIComponent(phoneParam))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.found) return;
+      if (data.name) nameEl.value = data.name;
+      phoneEl.value = data.phone || phoneParam;
+      phoneEl.readOnly = true;
+      if (data.hasCupo) {
+        CUPO_FIXED = data.acompanantes;
+        guestsEl.value = data.acompanantes;
+        guestsEl.disabled = true;
+        cupoNote.textContent = 'Cupo asignado: ' + data.acompanantes + ' acompañante(s)';
+        cupoNote.style.display = 'block';
+      }
+    })
+    .catch(function () { /* sin conexión al backend: el invitado llena manual */ });
+})();
+
 document.getElementById('submit-rsvp').addEventListener('click', function () {
   var name = document.getElementById('name').value.trim();
   var phone = document.getElementById('phone').value.trim();
   var attending = document.querySelector('input[name="attending"]:checked').value;
-  var guests = document.getElementById('guests').value;
+  var guests = (CUPO_FIXED !== null) ? CUPO_FIXED : document.getElementById('guests').value;
   var diet = document.getElementById('diet').value.trim();
   var parking = document.querySelector('input[name="parking"]:checked').value;
   var message = document.getElementById('message').value.trim();

@@ -48,6 +48,23 @@
 <a class="wa-float" href="https://wa.me/56994635497" target="_blank" aria-label="WhatsApp">💬</a>
 
 <script>
+// Prefill por teléfono si la URL trae ?phone=
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  var phoneParam = params.get('phone');
+  if (!phoneParam) return;
+  var nameEl = document.getElementById('name');
+  var phoneEl = document.getElementById('phone');
+  fetch('https://claw-wedding-agent-production.up.railway.app/api/rsvp/guest?phone=' + encodeURIComponent(phoneParam))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.found) return;
+      if (data.name) nameEl.value = data.name;
+      phoneEl.value = data.phone || phoneParam;
+    })
+    .catch(function () { /* sin backend: llena manual */ });
+})();
+
 document.getElementById('decline-form').addEventListener('submit', function (e) {
   e.preventDefault();
   var name = document.getElementById('name').value.trim();

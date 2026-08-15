@@ -608,6 +608,14 @@ function parseRsvpForm(text) {
 
 async function handleRsvpFormMessage(from, text) {
   const d = parseRsvpForm(text);
+
+  // CUPO FIJO (anti-tamper): si el invitado tiene cupo asignado, el valor del form se ignora.
+  const g = await getGuest(normalizePhone(from));
+  if (g && typeof g.acompanantes === 'number') {
+    d.acompanantes = String(g.acompanantes);
+    d._cupoEnforced = true;
+  }
+
   const asistRaw = (d.asistencia || '').toLowerCase();
 
   let status;
@@ -765,7 +773,7 @@ async function handleNovioCommand(from, text) {
       msg += `🆕 nuevo: ${stages.nuevo || 0} · 📨 invitación: ${stages.invitacion_enviada || 0} · ✅ confirmados: ${stages.confirmado || 0} · ❌ no: ${stages.no_asistira || 0} · 🤔 talvez: ${stages.tal_vez || 0}\n\n`;
       const emoji = { nuevo: '🆕', invitacion_enviada: '📨', confirmado: '✅', no_asistira: '❌', tal_vez: '🤔' };
       for (const g of guests.slice(0, 20)) {
-        msg += `${emoji[g.stage] || '❔'} ${g.name} — ${g.phone}${g.coupleId ? ' 👫' : ''}\n`;
+        msg += `${emoji[g.stage] || '❔'} ${g.name} — ${g.phone}${typeof g.acompanantes === 'number' ? ` · cupo ${g.acompanantes}` : ''}${g.coupleId ? ' 👫' : ''}\n`;
       }
       if (guests.length > 20) msg += `\n... y ${guests.length - 20} más`;
       await sendWhatsAppMessage(from, msg);
@@ -839,6 +847,22 @@ async function handleNovioCommand(from, text) {
     return;
   }
 
+  // editar acompañantes (cupo) de {phone} a {n}
+  if (/editar (acompa[nñ]antes|cupo) de/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+    const phoneMatch = text.match(PHONE_RE_SINGLE);
+    const phone = normalizePhone(phoneMatch[0]);
+    const cupoMatch = text.match(/(?:a\s+)?(\d+)\s*$/);
+    if (!cupoMatch) {
+      await sendWhatsAppMessage(from, `⚠️ Formato: *"editar acompañantes de {phone} a {n}"* (0-5)`);
+      return;
+    }
+    const n = parseInt(cupoMatch[1], 10);
+    const res = await editGuest(phone, 'acompanantes', n);
+    if (res.ok) await sendWhatsAppMessage(from, `✅ Cupo de *${res.guest.name}* actualizado: ${res.changed.from ?? 'sin cupo'} → *${res.changed.to}* acompañantes.`);
+    else await sendWhatsAppMessage(from, `⚠️ No pude editar: ${res.reason === 'no_existe' ? 'el invitado no existe' : 'error'}`);
+    return;
+  }
+
   // editar teléfono de {viejo} a {nuevo} — reemplaza con aviso
   if (/editar tel[eé]fono de/i.test(lower) && (text.match(PHONE_RE) || []).length >= 2) {
     const phones = (text.match(PHONE_RE) || []).map(p => normalizePhone(p));
@@ -902,11 +926,20 @@ async function handleNovioCommand(from, text) {
   await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar a {nombre} +56 9..."* — añadir invitado (o pareja: *"agregar a A +56 9... y B +56 9..."*)\n📨 *"enviar invitación a {phone}"* — enviar save-the-date a uno\n📨 *"reenviar invitación a {phone}"* — reenviar sin dedupe\n📨 *"enviar invitación a todos"* — batch a pendientes\n📋 *"ver invitados"* — listado con stages\n📊 *"ver confirmaciones"* — estado RSVP\n👫 *"vincular pareja {p1} {p2}"* — vincular 2 invitados (fix +1)\n✏️ *"editar correo/nombre/teléfono de {phone} a ..."* — editar invitado\n🗑️ *"eliminar invitado {phone}"* — eliminar (con confirmación)\n\n¿Qué necesitas?`);
 }
 
+// ── Cupo parser ──────────────────────────────────────────────
+// "cupo 3" / "con 3 acompañantes" / "3 acompañantes" → 3 (clamp 0..5)
+function parseCupo(text) {
+  const m = text.match(/cupo\s*(\d+)/i) || text.match(/(?:con\s+)?(\d+)\s*acompa[nñ]antes?/i);
+  if (m) return Math.max(0, Math.min(5, parseInt(m[1], 10)));
+  return null;
+}
+
 // ── Fase 2: agregar invitado conversacional (soporta PAREJAS 👫) ──
 async function addGuestViaChat(from, text) {
   // Parsear: "agrega a María Pérez +56 9 1234 5678 maria@gmail.com"
   // Pareja: "agrega a María Pérez +56 9 1111 2222 y Juan Soto +56 9 3333 4444"
   const phonesRaw = text.match(PHONE_RE) || [];
+  const cupo = parseCupo(text); // cupo fijo opcional (acompañantes permitidos)
   if (!phonesRaw.length) {
     await sendWhatsAppMessage(from, `⚠️ No encontré el WhatsApp del invitado. Formato:\n\n➡️ *"agregar a María Pérez +56 9 1234 5678"*\n\nPareja: *"agregar a María +56 9... y Juan +56 9..."* (correo opcional)`);
     return;
@@ -980,11 +1013,12 @@ async function addGuestViaChat(from, text) {
       stageUpdatedAt: new Date().toISOString(),
       templatesSent: [],                                 // ← F1: historial de envíos
     };
+    if (cupo != null) guest.acompanantes = cupo;         // ← cupo fijo (acompañantes permitidos)
     await redis.hset(guestKey, phone, JSON.stringify(guest));
     // Registrar actor como invitado
     await registerActor(phone, 'invitado', { name, email });
-    await notifySlack(`➕ *Invitado agregado por novio* \`${from}\`:\n👤 ${name}\n📱 ${phone}${email ? `\n📧 ${email}` : ''}`);
-    await sendWhatsAppMessage(from, `✅ Agregué a *${name}* (${phone})${email ? `, correo ${email}` : ''} a los invitados (stage: nuevo).\n\n➡️ Cuando quieras, envía la invitación con: *"enviar invitación a ${phone}"*`);
+    await notifySlack(`➕ *Invitado agregado por novio* \`${from}\`:\n👤 ${name}\n📱 ${phone}${email ? `\n📧 ${email}` : ''}${cupo != null ? `\n👥 Cupo: ${cupo}` : ''}`);
+    await sendWhatsAppMessage(from, `✅ Agregué a *${name}* (${phone})${email ? `, correo ${email}` : ''} a los invitados (stage: nuevo)${cupo != null ? ` con cupo de *${cupo}* acompañantes` : ''}.\n\n➡️ Cuando quieras, envía la invitación con: *"enviar invitación a ${phone}"*`);
   } catch (e) {
     console.error('❌ addGuestViaChat error:', e.message);
     await sendWhatsAppMessage(from, '⚠️ No pude guardar el invitado. Inténtalo de nuevo.');
@@ -1080,12 +1114,12 @@ async function editGuest(phone, field, value) {
     return { ok: true, guest, changed: { from: phone, to: newPhone } };
   }
 
-  if (field === 'name' || field === 'email') {
+  if (field === 'name' || field === 'email' || field === 'acompanantes') {
     const old = guest[field];
-    guest[field] = value;
+    guest[field] = field === 'acompanantes' ? Math.max(0, Math.min(5, parseInt(value, 10) || 0)) : value;
     await redis.hset('wedding:guests', phone, JSON.stringify(guest));
-    console.log(`✏️ ${field} actualizado para ${phone}: ${old} → ${value}`);
-    return { ok: true, guest, changed: { field, from: old, to: value } };
+    console.log(`✏️ ${field} actualizado para ${phone}: ${old} → ${guest[field]}`);
+    return { ok: true, guest, changed: { field, from: old, to: guest[field] } };
   }
 
   return { ok: false, reason: 'campo_invalido' };
@@ -1932,6 +1966,62 @@ app.get('/admin/guest-states', async (_req, res) => {
       byStage[s] = (byStage[s] || 0) + 1;
     }
     res.json({ total: guests.length, byStage, guests: guests.map(g => ({ phone: g.phone, name: g.name, stage: g.stage || 'sin_stage', templatesSent: (g.templatesSent || []).length })) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── CUPO / PREFILL (Ciclo invitados — 15-ago-2026) ──────────────
+// CORS: el micrositio (Bluehost) consulta el cupo del invitado por teléfono
+app.use('/api/rsvp', (_req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (_req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+// GET /api/rsvp/guest?phone=X — devuelve solo {name, phone, acompanantes, hasCupo} para prefill
+app.get('/api/rsvp/guest', async (req, res) => {
+  try {
+    const phone = normalizePhone(String(req.query.phone || ''));
+    if (!phone || phone.length < 8) return res.status(400).json({ error: 'phone requerido' });
+    const guest = await getGuest(phone);
+    if (!guest) return res.json({ found: false, name: null, phone, acompanantes: null, hasCupo: false });
+    res.json({
+      found: true,
+      name: guest.name || null,
+      phone: guest.phone || phone,
+      acompanantes: typeof guest.acompanantes === 'number' ? guest.acompanantes : null,
+      hasCupo: typeof guest.acompanantes === 'number',
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /admin/set-cupo — backfill masivo de cupo (body: { cupos: [{phone, acompanantes}, ...] })
+// También acepta un invitado individual: { phone, acompanantes }
+app.post('/admin/set-cupo', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const items = Array.isArray(b.cupos) ? b.cupos : (b.phone ? [{ phone: b.phone, acompanantes: b.acompanantes }] : []);
+    if (!items.length) return res.status(400).json({ error: 'Se requiere { cupos: [{phone, acompanantes}] } o { phone, acompanantes }' });
+
+    const results = [];
+    for (const item of items) {
+      const phone = normalizePhone(String(item.phone || ''));
+      const acompanantes = Math.max(0, Math.min(5, parseInt(item.acompanantes, 10) || 0));
+      const guest = await getGuest(phone);
+      if (!guest) { results.push({ phone, ok: false, reason: 'no_existe' }); continue; }
+      guest.acompanantes = acompanantes;
+      guest.cupoSetAt = new Date().toISOString();
+      await redis.hset('wedding:guests', phone, JSON.stringify(guest));
+      results.push({ phone, name: guest.name, acompanantes, ok: true });
+    }
+    const ok = results.filter(r => r.ok).length;
+    await notifySlack(`🎯 *Cupo backfill*: ${ok}/${results.length} invitados actualizados`);
+    res.json({ ok: true, total: results.length, updated: ok, results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
