@@ -277,6 +277,13 @@ function normalizePhone(phone) {
   return cleaned;
 }
 
+// Quita el prefijo placeholder "invitado" / "invitado:" que quedó en nombres legacy
+function cleanName(name) {
+  if (!name) return name;
+  const cleaned = String(name).replace(/^invitado\s*:?\s*/i, '').trim();
+  return cleaned || name;
+}
+
 // ── Healthcheck ──────────────────────────────────────────────
 app.get('/status', async (_req, res) => {
   let rsvpCount = 0;
@@ -2004,7 +2011,7 @@ app.get('/api/rsvp/guest', async (req, res) => {
     if (!guest) return res.json({ found: false, name: null, phone, acompanantes: null, hasCupo: false });
     res.json({
       found: true,
-      name: guest.name || null,
+      name: cleanName(guest.name),
       phone: guest.phone || phone,
       acompanantes: typeof guest.acompanantes === 'number' ? guest.acompanantes : null,
       hasCupo: typeof guest.acompanantes === 'number',
@@ -2036,6 +2043,28 @@ app.post('/admin/set-cupo', async (req, res) => {
     const ok = results.filter(r => r.ok).length;
     await notifySlack(`🎯 *Cupo backfill*: ${ok}/${results.length} invitados actualizados`);
     res.json({ ok: true, total: results.length, updated: ok, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /admin/clean-names — limpia el prefijo "invitado" de los nombres legacy (one-shot)
+app.post('/admin/clean-names', async (req, res) => {
+  try {
+    const all = await redis.hgetall('wedding:guests');
+    const results = [];
+    for (const [phone, raw] of Object.entries(all || {})) {
+      let guest;
+      try { guest = JSON.parse(raw); } catch (e) { continue; }
+      if (!guest.name) continue;
+      const cleaned = cleanName(guest.name);
+      if (cleaned !== guest.name) {
+        guest.name = cleaned;
+        await redis.hset('wedding:guests', phone, JSON.stringify(guest));
+        results.push({ phone, from: guest.name, to: cleaned });
+      }
+    }
+    res.json({ ok: true, updated: results.length, results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
