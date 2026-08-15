@@ -60,7 +60,7 @@
 <a class="wa-float" href="https://wa.me/56994635497" target="_blank" aria-label="WhatsApp">💬</a>
 
 <script>
-var CUPO_FIXED = null;
+var CUPO_MAX = null;
 
 // Prefill por teléfono: si la URL trae ?phone=, consultamos el cupo asignado al backend
 (function () {
@@ -84,10 +84,10 @@ var CUPO_FIXED = null;
       phoneEl.value = data.phone || phoneParam;
       phoneEl.readOnly = true;
       if (data.hasCupo) {
-        CUPO_FIXED = data.acompanantes;
-        guestsEl.value = data.acompanantes;
-        guestsEl.disabled = true;
-        cupoNote.textContent = 'Cupo asignado: ' + data.acompanantes + ' acompañante(s)';
+        CUPO_MAX = data.acompanantes;
+        guestsEl.max = data.acompanantes;
+        guestsEl.value = 0;
+        cupoNote.textContent = 'Puedes confirmar solo/a (0) o con hasta ' + data.acompanantes + ' acompañante(s)';
         cupoNote.style.display = 'block';
       }
     })
@@ -98,7 +98,8 @@ document.getElementById('submit-rsvp').addEventListener('click', function () {
   var name = document.getElementById('name').value.trim();
   var phone = document.getElementById('phone').value.trim();
   var attending = document.querySelector('input[name="attending"]:checked').value;
-  var guests = (CUPO_FIXED !== null) ? CUPO_FIXED : document.getElementById('guests').value;
+  var guestsVal = parseInt(document.getElementById('guests').value, 10) || 0;
+  var guests = (CUPO_MAX !== null) ? Math.max(0, Math.min(guestsVal, CUPO_MAX)) : guestsVal;
   var diet = document.getElementById('diet').value.trim();
   var parking = document.querySelector('input[name="parking"]:checked').value;
   var message = document.getElementById('message').value.trim();

@@ -616,10 +616,13 @@ function parseRsvpForm(text) {
 async function handleRsvpFormMessage(from, text) {
   const d = parseRsvpForm(text);
 
-  // CUPO FIJO (anti-tamper): si el invitado tiene cupo asignado, el valor del form se ignora.
+  // CUPO MÁXIMO (anti-tamper): si el invitado tiene cupo asignado, se respeta como tope.
+  // El invitado puede confirmar solo (0) o con hasta su cupo, pero nunca más.
   const g = await getGuest(normalizePhone(from));
   if (g && typeof g.acompanantes === 'number') {
-    d.acompanantes = String(g.acompanantes);
+    const cupo = g.acompanantes;
+    const n = parseInt(d.acompanantes, 10) || 0;
+    d.acompanantes = String(Math.max(0, Math.min(n, cupo)));
     d._cupoEnforced = true;
   }
 
