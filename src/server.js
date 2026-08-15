@@ -930,7 +930,7 @@ async function handleNovioCommand(from, text) {
   }
 
   // Comando no reconocido — menú rápido
-  await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar a {nombre} +56 9..."* — añadir invitado (o pareja: *"agregar a A +56 9... y B +56 9..."*)\n📨 *"enviar invitación a {phone}"* — enviar save-the-date a uno\n📨 *"reenviar invitación a {phone}"* — reenviar sin dedupe\n📨 *"enviar invitación a todos"* — batch a pendientes\n📋 *"ver invitados"* — listado con stages\n📊 *"ver confirmaciones"* — estado RSVP\n👫 *"vincular pareja {p1} {p2}"* — vincular 2 invitados (fix +1)\n✏️ *"editar correo/nombre/teléfono de {phone} a ..."* — editar invitado\n🗑️ *"eliminar invitado {phone}"* — eliminar (con confirmación)\n\n¿Qué necesitas?`);
+  await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar a {nombre} +56 9..."* — añadir invitado (o pareja: *"agregar a A +56 9... y B +56 9..."*; con cupo: *"... cupo 2"*)\n📨 *"enviar invitación a {phone}"* — enviar save-the-date a uno\n📨 *"reenviar invitación a {phone}"* — reenviar sin dedupe\n📨 *"enviar invitación a todos"* — batch a pendientes\n📋 *"ver invitados"* — listado con stages y cupo\n📊 *"ver confirmaciones"* — estado RSVP\n👥 *"editar acompañantes de {phone} a {n}"* — fijar cupo (0-5)\n👫 *"vincular pareja {p1} {p2}"* — vincular 2 invitados (fix +1)\n✏️ *"editar correo/nombre/teléfono de {phone} a ..."* — editar invitado\n🗑️ *"eliminar invitado {phone}"* — eliminar (con confirmación)\n\n¿Qué necesitas?`);
 }
 
 // ── Cupo parser ──────────────────────────────────────────────
