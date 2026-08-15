@@ -145,6 +145,66 @@ Nos casamos el {{1}} de {{2}} de {{3}}. Reserva la fecha y confirma tu asistenci
 
 ---
 
+## Template 1e: `save_the_date_v5_img` 🆕 (URL BUTTONS DINÁMICOS + IMAGE) — 15-Ago
+
+**Meta ID:** `1707548530350870`
+**Status:** ⏳ PENDING (creado 15-Ago-2026, espera aprobación Meta 24-48h)
+**Categoría:** MARKETING | **Idioma:** es
+
+> Evolución de `save_the_date_v4_img`: los botones URL ahora llevan **variable dinámica** con el teléfono del invitado (`?phone={{1}}`) para pre-llenar el formulario RSVP automáticamente.
+> ⚠️ **Lección clave (error 2388052):** en botones URL, las variables se numeran **independientes por componente** (`{{1}}`, NO `{{4}}` continuando el body). Usar `{{4}}` en el query string dispara "URL button format invalid". Cada botón usa su propia `{{1}}` = teléfono del invitado.
+
+### Header (IMAGE)
+Foto pareja: `site/assets/foto-pareja.jpg` (subida vía Resumable Upload API).
+
+### Body
+```
+Nos casamos el {{1}} de {{2}} de {{3}}. Reserva la fecha y confirma tu asistencia tocando un boton:
+```
+
+### Variables
+| Componente | Var | Ejemplo |
+|-----------|-----|---------|
+| Body | {{1}} | 17 |
+| Body | {{2}} | noviembre |
+| Body | {{3}} | 2026 |
+| Botón 0 | {{1}} | 56912345678 (teléfono invitado) |
+| Botón 1 | {{1}} | 56912345678 (teléfono invitado) |
+
+### Botones (URL dinámicos)
+| Tipo | Texto | URL |
+|------|-------|-----|
+| URL | Confirmar asistencia | https://alejandro-kuilen.noscasamos.vip/rsvp.html?phone={{1}} |
+| URL | No podre asistir | https://alejandro-kuilen.noscasamos.vip/no-confirmado.html?phone={{1}} |
+
+### Envío (payload con botones)
+```json
+{
+  "type": "template",
+  "template": {
+    "name": "save_the_date_v5_img",
+    "language": {"code": "es"},
+    "components": [
+      { "type": "header", "parameters": [{"type":"image","image":{"id":"<mediaId>"}}] },
+      { "type": "body", "parameters": [
+          {"type":"text","text":"17"},
+          {"type":"text","text":"noviembre"},
+          {"type":"text","text":"2026"}
+      ]},
+      { "type": "button", "sub_type": "url", "index": "0", "parameters": [{"type":"text","text":"56912345678"}] },
+      { "type": "button", "sub_type": "url", "index": "1", "parameters": [{"type":"text","text":"56912345678"}] }
+    ]
+  }
+}
+```
+
+### Activación
+- El backend usa `SAVE_THE_DATE_TEMPLATE` (env var, default `save_the_date_v4_img`).
+- Cuando Meta apruebe v5: setear `SAVE_THE_DATE_TEMPLATE=save_the_date_v5_img` en Railway.
+- `sendInviteTemplate()` detecta `.includes('v5')` y agrega los 2 componentes `button` automáticamente.
+
+---
+
 ## Template 9: `boda_info_img` (URL BUTTONS + IMAGE HEADER) — 03-Ago
 
 **Meta ID:** `2386197625122304` | **Status:** ✅ APPROVED (04-Ago) | **Categoría:** UTILITY | **Idioma:** es

@@ -1191,6 +1191,11 @@ async function migrateGuestsToListHash() {
 // URL de la foto para templates con IMAGE header (micrositio, verificado 200)
 const SAVE_THE_DATE_IMG_URL = (TENANT.siteUrl || 'https://alejandro-kuilen.noscasamos.vip').replace(/\/$/, '') + '/assets/foto-pareja.jpg';
 
+// Template activo para invitación. v5_img agrega 2 botones URL dinámicos (?phone={{1}} por botón,
+// variable independiente por componente). Activar vía env SAVE_THE_DATE_TEMPLATE=save_the_date_v5_img
+// cuando Meta apruebe (id 1707548530350870, PENDING). Hasta entonces cae a v4_img (botones estáticos).
+const SAVE_THE_DATE_TEMPLATE = process.env.SAVE_THE_DATE_TEMPLATE || 'save_the_date_v4_img';
+
 // Enviar invitación (save_the_date_v4_img con header IMAGE) a un invitado
 async function sendInviteToGuest(from, phone, opts = {}) {
   const guest = await getGuest(phone);
@@ -1199,7 +1204,7 @@ async function sendInviteToGuest(from, phone, opts = {}) {
     return;
   }
   // Dedupe: si ya tiene invitación enviada y no está en 'nuevo', avisar (salvo force/reenvío)
-  const already = (guest.templatesSent || []).some(t => t.name === 'save_the_date_v4_img');
+  const already = (guest.templatesSent || []).some(t => t.name === SAVE_THE_DATE_TEMPLATE);
   if (already && guest.stage !== 'nuevo' && !opts.force) {
     await sendWhatsAppMessage(from, `ℹ️ A *${guest.name}* ya se le envió la invitación (stage: ${guest.stage}).\n\n➡️ Si quieres reenviarla igual: *"reenviar invitación a ${phone}"*`);
     return;
@@ -1208,7 +1213,7 @@ async function sendInviteToGuest(from, phone, opts = {}) {
     const mediaId = await uploadImageToMeta(SAVE_THE_DATE_IMG_URL);
     const result = await sendInviteTemplate(phone, mediaId);
     if (result?.messages?.[0]?.id) {
-      await recordTemplateSent(phone, 'save_the_date_v4_img', result.messages[0].id);
+      await recordTemplateSent(phone, SAVE_THE_DATE_TEMPLATE, result.messages[0].id);
       await updateGuestStage(phone, 'invitacion_enviada');
       const totalEnvio = (guest.templatesSent || []).length + 1;
       await sendWhatsAppMessage(from, opts.force
@@ -1244,7 +1249,7 @@ async function sendInviteToAll(from) {
         if (!mediaId) mediaId = await uploadImageToMeta(SAVE_THE_DATE_IMG_URL); // subir foto una vez
         const result = await sendInviteTemplate(g.phone, mediaId);
         if (result?.messages?.[0]?.id) {
-          await recordTemplateSent(g.phone, 'save_the_date_v4_img', result.messages[0].id);
+          await recordTemplateSent(g.phone, SAVE_THE_DATE_TEMPLATE, result.messages[0].id);
           await updateGuestStage(g.phone, 'invitacion_enviada');
           ok++;
         } else {
@@ -1580,8 +1585,8 @@ async function sendAutoReply(to, text) {
   }
 }
 
-// ── Send WhatsApp Template con IMAGE header (save_the_date_v4_img) ──
-// El template v4_img requiere: header IMAGE (foto fresca subida) + 3 variables de body
+// ── Send WhatsApp Template con IMAGE header ──
+// v4_img: header IMAGE + 3 variables de body. v5_img: además 2 botones URL dinámicos ({{1}} = teléfono).
 async function uploadImageToMeta(imageUrl) {
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 30000 });
   const img = Buffer.from(imgRes.data);
@@ -1607,22 +1612,31 @@ async function sendInviteTemplate(to, mediaId) {
   // Body: "Nos casamos el {{1}} de {{2}} de {{3}}." → 17 / noviembre / 2026
   const [anio, mesNum, dia] = (TENANT.fecha || '2026-11-17').split('-');
   const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const components = [
+    { type: 'header', parameters: [{ type: 'image', image: { id: mediaId } }] },
+    { type: 'body', parameters: [
+      { type: 'text', text: String(parseInt(dia, 10)) },
+      { type: 'text', text: meses[parseInt(mesNum, 10) - 1] || 'noviembre' },
+      { type: 'text', text: anio },
+    ]},
+  ];
+  // v5_img: 2 botones URL dinámicos. Cada botón usa {{1}} = teléfono del invitado (variable propia por botón).
+  if (SAVE_THE_DATE_TEMPLATE.includes('v5')) {
+    const phoneParam = String(to).replace(/^\+/, '');
+    components.push(
+      { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: phoneParam }] },
+      { type: 'button', sub_type: 'url', index: '1', parameters: [{ type: 'text', text: phoneParam }] },
+    );
+  }
   const res = await axios.post(`${META_API}/${PHONE_NUMBER_ID}/messages`, {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
     to: to,
     type: 'template',
     template: {
-      name: 'save_the_date_v4_img',
+      name: SAVE_THE_DATE_TEMPLATE,
       language: { code: 'es' },
-      components: [
-        { type: 'header', parameters: [{ type: 'image', image: { id: mediaId } }] },
-        { type: 'body', parameters: [
-          { type: 'text', text: String(parseInt(dia, 10)) },
-          { type: 'text', text: meses[parseInt(mesNum, 10) - 1] || 'noviembre' },
-          { type: 'text', text: anio },
-        ]},
-      ],
+      components,
     },
   }, {
     headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },

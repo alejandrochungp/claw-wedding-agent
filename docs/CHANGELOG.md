@@ -1,5 +1,24 @@
 # Changelog — claw-wedding-agent
 
+## v1.8.0 — 15-Ago-2026 18:20 CLT
+
+### Cambios
+- **Cupo fijo de acompañantes:** cada invitado tiene un `acompanantes` fijo (0-5) que el invitado NO puede editar en el formulario. Enforcement server-side en `handleRsvpFormMessage` (ignora valor manipulado cuando existe cupo).
+- **Prefill RSVP por teléfono:** `GET /api/rsvp/guest?phone=X` (CORS) + `rsvp.html`/`no-confirmado.html` leen `?phone=` y pre-llenan nombre/teléfono (teléfono readonly, `#guests` deshabilitado con nota "Cupo asignado: N").
+- **Backfill:** `POST /admin/set-cupo` (bulk `{cupos:[...]}` o single) para fijar cupo masivo. 19 invitados backfilled desde RSVP declarado (con correcciones Alejandro).
+- **Template v5:** `save_the_date_v5_img` (Meta id `1707548530350870`, PENDING) con botones URL dinámicos `?phone={{1}}`.
+- **Comando nuevo:** `editar acompañantes de {phone} a {n}` + `cupo N` visible en `ver invitados`.
+
+### Technical
+- `SAVE_THE_DATE_TEMPLATE` (env, default `save_the_date_v4_img`) — switch a v5 cuando Meta apruebe.
+- `sendInviteTemplate()` agrega componentes `button` (sub_type url, index 0/1) cuando el template incluye `v5`.
+- `parseCupo()` + `editGuest(acompanantes)` + `addGuestViaChat` parsean y persisten cupo.
+- **Lección Meta:** variables de botón URL se numeran independientes por componente (`{{1}}`, no `{{4}}` continuando body) — error 2388052 "URL button format invalid".
+
+### Archivos
+- `scripts/submit_template_v5.py` — creación v5 vía Resumable Upload API.
+- `docs/MANUAL-USO-NOSCASAMOS-VIP.md` — manual de uso extenso (para indexar en el sitio).
+
 ## v1.6.0 — 26-Jul-2026 14:35 CLT
 
 ### Cambios
