@@ -148,7 +148,7 @@ Nos casamos el {{1}} de {{2}} de {{3}}. Reserva la fecha y confirma tu asistenci
 ## Template 1e: `save_the_date_v5_img` 🆕 (URL BUTTONS DINÁMICOS + IMAGE) — 15-Ago
 
 **Meta ID:** `1707548530350870`
-**Status:** ⏳ PENDING (creado 15-Ago-2026, espera aprobación Meta 24-48h)
+**Status:** ✅ APPROVED (aprobado 15-Ago-2026 en ~1h) y **ACTIVO** (`SAVE_THE_DATE_TEMPLATE=save_the_date_v5_img`)
 **Categoría:** MARKETING | **Idioma:** es
 
 > Evolución de `save_the_date_v4_img`: los botones URL ahora llevan **variable dinámica** con el teléfono del invitado (`?phone={{1}}`) para pre-llenar el formulario RSVP automáticamente.
@@ -200,8 +200,9 @@ Nos casamos el {{1}} de {{2}} de {{3}}. Reserva la fecha y confirma tu asistenci
 
 ### Activación
 - El backend usa `SAVE_THE_DATE_TEMPLATE` (env var, default `save_the_date_v4_img`).
-- Cuando Meta apruebe v5: setear `SAVE_THE_DATE_TEMPLATE=save_the_date_v5_img` en Railway.
+- ✅ **Ya activado:** `SAVE_THE_DATE_TEMPLATE=save_the_date_v5_img` seteado en Railway (15-Ago-2026, aprobado ~1h tras creación).
 - `sendInviteTemplate()` detecta `.includes('v5')` y agrega los 2 componentes `button` automáticamente.
+- E2E verificado: invitación v5 entregada al WhatsApp de Alejandro con botones `?phone=<tel>` (accepted, wamid).
 
 ---
 

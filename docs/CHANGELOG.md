@@ -6,7 +6,7 @@
 - **Cupo fijo de acompañantes:** cada invitado tiene un `acompanantes` fijo (0-5) que el invitado NO puede editar en el formulario. Enforcement server-side en `handleRsvpFormMessage` (ignora valor manipulado cuando existe cupo).
 - **Prefill RSVP por teléfono:** `GET /api/rsvp/guest?phone=X` (CORS) + `rsvp.html`/`no-confirmado.html` leen `?phone=` y pre-llenan nombre/teléfono (teléfono readonly, `#guests` deshabilitado con nota "Cupo asignado: N").
 - **Backfill:** `POST /admin/set-cupo` (bulk `{cupos:[...]}` o single) para fijar cupo masivo. 19 invitados backfilled desde RSVP declarado (con correcciones Alejandro).
-- **Template v5:** `save_the_date_v5_img` (Meta id `1707548530350870`, PENDING) con botones URL dinámicos `?phone={{1}}`.
+- **Template v5:** `save_the_date_v5_img` (Meta id `1707548530350870`, ✅ APPROVED ~1h y activado vía `SAVE_THE_DATE_TEMPLATE`) con botones URL dinámicos `?phone={{1}}`.
 - **Comando nuevo:** `editar acompañantes de {phone} a {n}` + `cupo N` visible en `ver invitados`.
 
 ### Technical

@@ -55,6 +55,8 @@
   if (!phoneParam) return;
   var nameEl = document.getElementById('name');
   var phoneEl = document.getElementById('phone');
+  // Prellenar SIEMPRE el teléfono desde la URL (aunque el invitado no esté registrado)
+  phoneEl.value = phoneParam;
   fetch('https://claw-wedding-agent-production.up.railway.app/api/rsvp/guest?phone=' + encodeURIComponent(phoneParam))
     .then(function (r) { return r.json(); })
     .then(function (data) {
