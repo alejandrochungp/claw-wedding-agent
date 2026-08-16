@@ -8,6 +8,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<style>
+  .stepper { display: flex; align-items: center; gap: 14px; }
+  .stepper-btn { width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid var(--color-secondary); background: #fff; color: var(--color-primary); font-size: 1.5rem; line-height: 1; cursor: pointer; font-weight: 700; transition: background .15s, color .15s, opacity .15s; }
+  .stepper-btn:hover:not(:disabled) { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+  .stepper-btn:disabled { opacity: .35; cursor: not-allowed; }
+  .stepper-value { min-width: 40px; text-align: center; font-size: 1.5rem; font-weight: 700; color: var(--color-text); }
+</style>
 </head>
 <body>
 <header class="page-header">
@@ -32,8 +39,12 @@
       <label><input type="radio" name="attending" value="talvez"> Tal vez 🤔</label>
     </div>
 
-    <label for="guests">N° de acompañantes</label>
-    <input type="number" id="guests" name="guests" min="0" max="5" value="0">
+    <label>N° de acompañantes</label>
+    <div class="stepper" id="guests-stepper">
+      <button type="button" id="guests-minus" class="stepper-btn" aria-label="Quitar acompañante">−</button>
+      <span id="guests" class="stepper-value">0</span>
+      <button type="button" id="guests-plus" class="stepper-btn" aria-label="Agregar acompañante">+</button>
+    </div>
     <p id="cupo-note" style="margin:4px 0 0; font-size:.85rem; color:#8B3232; display:none;"></p>
 
     <label for="diet">Restricciones alimentarias</label>
@@ -61,16 +72,34 @@
 
 <script>
 var CUPO_MAX = null;
+var GUESTS = 0;
+
+function maxGuests() { return (CUPO_MAX !== null) ? CUPO_MAX : 5; }
+
+function renderGuests() {
+  var valueEl = document.getElementById('guests');
+  var minusBtn = document.getElementById('guests-minus');
+  var plusBtn = document.getElementById('guests-plus');
+  valueEl.textContent = GUESTS;
+  minusBtn.disabled = (GUESTS <= 0);
+  plusBtn.disabled = (GUESTS >= maxGuests());
+}
+
+document.getElementById('guests-minus').addEventListener('click', function () {
+  if (GUESTS > 0) { GUESTS--; renderGuests(); }
+});
+document.getElementById('guests-plus').addEventListener('click', function () {
+  if (GUESTS < maxGuests()) { GUESTS++; renderGuests(); }
+});
 
 // Prefill por teléfono: si la URL trae ?phone=, consultamos el cupo asignado al backend
 (function () {
   var params = new URLSearchParams(window.location.search);
   var phoneParam = params.get('phone');
-  if (!phoneParam) return;
+  if (!phoneParam) { renderGuests(); return; }
 
   var nameEl = document.getElementById('name');
   var phoneEl = document.getElementById('phone');
-  var guestsEl = document.getElementById('guests');
   var cupoNote = document.getElementById('cupo-note');
 
   // Prellenar SIEMPRE el teléfono desde la URL (aunque el invitado no esté registrado)
@@ -79,38 +108,26 @@ var CUPO_MAX = null;
   fetch('https://claw-wedding-agent-production.up.railway.app/api/rsvp/guest?phone=' + encodeURIComponent(phoneParam))
     .then(function (r) { return r.json(); })
     .then(function (data) {
-      if (!data || !data.found) return;
+      if (!data || !data.found) { renderGuests(); return; }
       if (data.name) nameEl.value = data.name;
       phoneEl.value = data.phone || phoneParam;
       phoneEl.readOnly = true;
       if (data.hasCupo) {
         CUPO_MAX = data.acompanantes;
-        guestsEl.max = data.acompanantes;
-        guestsEl.value = 0;
+        GUESTS = 0;
         cupoNote.textContent = 'Puedes confirmar solo/a (0) o con hasta ' + data.acompanantes + ' acompañante(s)';
         cupoNote.style.display = 'block';
       }
-      clampGuests();
+      renderGuests();
     })
-    .catch(function () { /* sin conexión al backend: el invitado llena manual */ });
+    .catch(function () { renderGuests(); });
 })();
-
-// Limita en vivo el campo de acompañantes: no deja escribir más del tope (cupo o 5 por defecto)
-function clampGuests() {
-  var el = document.getElementById('guests');
-  var max = (CUPO_MAX !== null) ? CUPO_MAX : 5;
-  var n = parseInt(el.value, 10);
-  if (isNaN(n) || n < 0) { el.value = 0; return; }
-  if (n > max) el.value = max;
-}
-document.getElementById('guests').addEventListener('input', clampGuests);
 
 document.getElementById('submit-rsvp').addEventListener('click', function () {
   var name = document.getElementById('name').value.trim();
   var phone = document.getElementById('phone').value.trim();
   var attending = document.querySelector('input[name="attending"]:checked').value;
-  var guestsVal = parseInt(document.getElementById('guests').value, 10) || 0;
-  var guests = (CUPO_MAX !== null) ? Math.max(0, Math.min(guestsVal, CUPO_MAX)) : guestsVal;
+  var guests = GUESTS;
   var diet = document.getElementById('diet').value.trim();
   var parking = document.querySelector('input[name="parking"]:checked').value;
   var message = document.getElementById('message').value.trim();
