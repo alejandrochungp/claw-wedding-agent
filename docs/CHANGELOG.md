@@ -1,13 +1,15 @@
 # Changelog — claw-wedding-agent
 
-## v1.8.0 — 15-Ago-2026 18:20 CLT
+## v1.8.0 — 15-Ago-2026 20:30 CLT
 
 ### Cambios
-- **Cupo fijo de acompañantes:** cada invitado tiene un `acompanantes` fijo (0-5) que el invitado NO puede editar en el formulario. Enforcement server-side en `handleRsvpFormMessage` (ignora valor manipulado cuando existe cupo).
-- **Prefill RSVP por teléfono:** `GET /api/rsvp/guest?phone=X` (CORS) + `rsvp.html`/`no-confirmado.html` leen `?phone=` y pre-llenan nombre/teléfono (teléfono readonly, `#guests` deshabilitado con nota "Cupo asignado: N").
+- **Cupo máximo de acompañantes (editable hasta el tope):** cada invitado tiene un `acompanantes` (0-5) que define el *máximo* permitido. El invitado puede confirmar solo/a (0) o con hasta su cupo, pero nunca más. Enforcement server-side en `handleRsvpFormMessage` (`Math.min(n, cupo)`).
+- **Stepper +/−:** el campo de acompañantes es ahora botones `−`/`+` con el `+` deshabilitado al llegar al cupo (imposible escribir de más).
+- **Prefill RSVP por teléfono:** `GET /api/rsvp/guest?phone=X` (CORS) + `rsvp.html`/`no-confirmado.html` leen `?phone=` y pre-llenan nombre/teléfono (teléfono readonly, nota "Puedes confirmar solo/a (0) o con hasta N").
 - **Backfill:** `POST /admin/set-cupo` (bulk `{cupos:[...]}` o single) para fijar cupo masivo. 19 invitados backfilled desde RSVP declarado (con correcciones Alejandro).
 - **Template v5:** `save_the_date_v5_img` (Meta id `1707548530350870`, ✅ APPROVED ~1h y activado vía `SAVE_THE_DATE_TEMPLATE`) con botones URL dinámicos `?phone={{1}}`.
-- **Comando nuevo:** `editar acompañantes de {phone} a {n}` + `cupo N` visible en `ver invitados`.
+- **Comando nuevo:** `editar acompañantes de {phone} a {n}` + `cupo N` visible en `ver invitados` y en el panel de novios.
+- **Nombres coreanos/chinos:** `editar nombre de {phone} a {nombre}` ahora acepta cualquier carácter (Hangul, chino), no solo latinos.
 
 ### Technical
 - `SAVE_THE_DATE_TEMPLATE` (env, default `save_the_date_v4_img`) — switch a v5 cuando Meta apruebe.
