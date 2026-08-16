@@ -90,9 +90,20 @@ var CUPO_MAX = null;
         cupoNote.textContent = 'Puedes confirmar solo/a (0) o con hasta ' + data.acompanantes + ' acompañante(s)';
         cupoNote.style.display = 'block';
       }
+      clampGuests();
     })
     .catch(function () { /* sin conexión al backend: el invitado llena manual */ });
 })();
+
+// Limita en vivo el campo de acompañantes: no deja escribir más del tope (cupo o 5 por defecto)
+function clampGuests() {
+  var el = document.getElementById('guests');
+  var max = (CUPO_MAX !== null) ? CUPO_MAX : 5;
+  var n = parseInt(el.value, 10);
+  if (isNaN(n) || n < 0) { el.value = 0; return; }
+  if (n > max) el.value = max;
+}
+document.getElementById('guests').addEventListener('input', clampGuests);
 
 document.getElementById('submit-rsvp').addEventListener('click', function () {
   var name = document.getElementById('name').value.trim();
