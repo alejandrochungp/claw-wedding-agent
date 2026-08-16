@@ -80,13 +80,13 @@ Cada invitado pasa por etapas que se ven en `ver invitados`:
 3. **confirmado** — confirmó asistencia (por botón o formulario).
 4. **no_asistira** — indicó que no asistirá.
 
-### 3.3 Cupo de acompañantes (cupo fijo)
+### 3.3 Cupo de acompañantes (cupo máximo)
 
-Cada invitado puede tener un **cupo fijo** de acompañantes (de 0 a 5). Ese cupo:
+Cada invitado puede tener un **cupo máximo** de acompañantes (de 0 a 5). Ese cupo:
 
 - Lo define el novio al agregar al invitado (`con N acompañantes` o `cupo N`).
-- El invitado **no puede cambiarlo** desde el formulario: si el cupo está fijado, el formulario lo muestra bloqueado con la nota "Cupo asignado: N".
-- Aunque el invitado manipule el formulario, el servidor **ignora** el valor enviado y usa el cupo asignado.
+- El invitado **puede elegir libremente entre 0 y su cupo** (ir solo/a o con hasta N acompañantes), pero **nunca superarlo**. El formulario usa botones **− / +** y el `+` se deshabilita al llegar al cupo.
+- Aunque el invitado manipule el formulario, el servidor **recorta** el valor enviado a su cupo (`min(valor, cupo)`).
 
 **Comandos de cupo:**
 
@@ -94,7 +94,7 @@ Cada invitado puede tener un **cupo fijo** de acompañantes (de 0 a 5). Ese cupo
 - Cambiar después: `editar acompañantes de {phone} a 3`
 - Ver: `ver invitados` (muestra `cupo N` cuando está fijado)
 
-> Un invitado sin cupo fijado (sin `acompañantes`) puede elegir libremente en el formulario.
+> Un invitado sin cupo fijado (sin `acompañantes`) puede elegir libremente hasta 5 en el formulario.
 
 ---
 
@@ -114,7 +114,7 @@ Al tocar un botón se abre el sitio web directamente en el formulario correspond
 Al tocar **"Confirmar asistencia"** se abre `rsvp.html`. El formulario ya llega **pre-llenado** con el nombre y el teléfono del invitado (detectado automáticamente por su número). El invitado solo debe:
 
 1. Verificar su nombre.
-2. Indicar acompañantes (si su cupo no está fijado; si está fijado, aparece bloqueado).
+2. Indicar acompañantes con los botones **− / +** (de 0 hasta su cupo máximo; el `+` se bloquea al llegar al tope).
 3. Opcional: dejar un mensaje.
 4. Tocar **Enviar**.
 
@@ -153,7 +153,7 @@ La página `regalos.html` ofrece tres vías de regalo:
 ## 7. Preguntas frecuentes
 
 **¿El invitado puede cambiar cuántos acompañantes lleva?**
-No, si el novio le fijó un cupo. El cupo aparece bloqueado en el formulario y se respeta en el servidor.
+Sí, entre 0 y su cupo máximo. Si el novio le fijó un cupo (ej. 2), puede confirmar solo/a (0) o con hasta 2 acompañantes usando los botones − / +, pero no más.
 
 **¿Cómo sé quién confirmó?**
 El novio escribe `ver confirmaciones` en WhatsApp y ve el estado al instante. También recibe una notificación cada vez que alguien confirma.

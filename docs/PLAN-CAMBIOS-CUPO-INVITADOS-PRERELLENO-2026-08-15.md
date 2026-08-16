@@ -1,7 +1,7 @@
 # PLAN DE CAMBIOS — Cupo de acompañantes fijo + formulario pre-rellenado por teléfono
 
 > **Fecha:** 15-Ago-2026 15:55 | **Autor:** Claw | **Sesión:** DeepSeek V4 Pro
-> **Estado:** PARA REVISIÓN — Alejandro aprueba antes de implementar
+> **Estado:** ✅ IMPLEMENTADO Y VERIFICADO (15-Ago-2026 20:30) — ver resumen al final
 > **Sistema:** claw-wedding-agent (Railway) + micrositio nupcial (Bluehost subdominio)
 
 ---
@@ -158,3 +158,34 @@
 - **En el envío**, el bot pasa el teléfono como parámetro del botón: `components[{type:'button', sub_type:'url', index:'0', parameters:[{type:'text', text: phone}]}]`.
 - Esto reemplaza la "Opción 1 (texto libre 24h)" — con el botón URL dinámico no hace falta mensaje extra; el invitado toca el botón y cae directo al form pre-llenado.
 - **Mientras Meta aprueba la v5**, se puede usar el link por texto libre (24h) como puente, o el form actual sin pre-llenado.
+
+---
+
+## ✅ Resumen de implementación (15-Ago-2026 20:30 CLT)
+
+Todo el plan quedó implementado, deployado y verificado con ajustes de Alejandro sobre la marcha:
+
+### Cupo de acompañantes — **máximo editable** (no bloqueado)
+- Semántica final: `guest.acompanantes` = **cupo máximo** (0-5). El invitado puede confirmar solo/a (0) o con hasta su cupo, **pero nunca más**.
+- Alejandro cambió el requisito a mitad de camino: primero se implementó "bloqueado", luego pidió "editable hasta el tope".
+- **Frontend:** `rsvp.html` usa un **stepper con botones − / +**; el `+` se deshabilita al llegar al cupo (o 5 default). Imposible escribir de más.
+- **Backend:** `handleRsvpFormMessage` hace clamp `Math.max(0, Math.min(n, cupo))` (autoridad = backend).
+
+### Prefill por teléfono
+- `GET /api/rsvp/guest?phone=X` (CORS) devuelve `{found, name, phone, acompanantes, hasCupo}`.
+- `rsvp.html` y `no-confirmado.html` leen `?phone=` y pre-llenan **siempre** el teléfono; nombre/cupo solo cuando `found:true`.
+
+### Template v5
+- `save_the_date_v5_img` (Meta id `1707548530350870`) ✅ APPROVED (~1h) y activo vía env `SAVE_THE_DATE_TEMPLATE`.
+- Botones URL dinámicos `rsvp.html?phone={{1}}` y `no-confirmado.html?phone={{1}}` (numeración por componente).
+
+### Backfill
+- `POST /admin/set-cupo` fijó cupo a 19 invitados desde RSVP declarado (con correcciones de Alejandro: Gibran 1, Federico/Daniela 0, etc.).
+
+### Extras pedidos por Alejandro
+- Comando `editar acompañantes de {phone} a {n}` + visible en `ver invitados` y en el **Panel de novios**.
+- `editar nombre de {phone} a {nombre}` ahora acepta **nombres coreanos/chinos** (regex `a\s+([^\n]+)$`, antes solo latino).
+- `cleanName()` + `POST /admin/clean-names` para limpiar el prefijo legacy "invitado".
+
+### Commits
+`ae579e7` (cupo+prefill+backfill admin) · `d189022` (template v5 support) · `f344503` (cleanName) · `9dd6eb1` (prefill teléfono incondicional + docs v5 APPROVED) · `1a622b4` (menú panel novios) · `02b4983` (nombres coreanos) · `c5446d9` (clamp cupo) · `5ea87c6` (input listener) · `3846e4f` (stepper +/−) · `77228d5` (CHANGELOG v1.8.0).
