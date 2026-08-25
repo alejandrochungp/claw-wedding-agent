@@ -7,9 +7,10 @@ const express = require('express');
 const Redis = require('ioredis');
 const axios = require('axios');
 const { Pool } = require('pg');
+const crypto = require('crypto');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ type: ['application/json', 'text/plain', 'application/*+json'], verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 // ── Config ───────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
@@ -28,6 +29,8 @@ const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 const DATABASE_URL = process.env.DATABASE_URL || ''; // Postgres (leads + actores)
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN || ''; // Mercado Pago (Código Novios)
 const CN_SITE_URL = process.env.CN_SITE_URL || 'https://codigonovios.cl';
+const LINKIFY_MERCHANT = process.env.LINKIFY_MERCHANT || '4V9PdORjokOya1Y'; // Linkify (Código Novios)
+const LINKIFY_PRIVATE_KEY = process.env.LINKIFY_PRIVATE_KEY || ''; // HMAC webhook Linkify
 const CN_ADMIN_SECRET = process.env.CN_ADMIN_SECRET || 'cn_admin_secret_2026'; // firma tokens panel novios
 
 const META_API = 'https://graph.facebook.com/v22.0';
@@ -139,6 +142,9 @@ async function initPostgres() {
     await pg.query('CREATE INDEX IF NOT EXISTS idx_cn_deseos_novio ON cn_deseos(novio_id)');
     await pg.query('CREATE INDEX IF NOT EXISTS idx_cn_regalos_novio ON cn_regalos(novio_id)');
     await pg.query('CREATE INDEX IF NOT EXISTS idx_cn_regalos_estado ON cn_regalos(estado)');
+    await pg.query('ALTER TABLE cn_regalos ADD COLUMN IF NOT EXISTS linkify_invoice_id TEXT');
+    await pg.query('ALTER TABLE cn_regalos ADD COLUMN IF NOT EXISTS rut_invitado TEXT');
+    await pg.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_cn_regalos_linkify_invoice ON cn_regalos(linkify_invoice_id)');
     console.log('✅ Postgres listo — tablas leads + cn_* creadas/verificadas');
   } catch (err) {
     console.error('❌ Postgres init error:', err.message);
@@ -2263,8 +2269,164 @@ app.post('/admin/cn/setup', async (req, res) => {
   }
 });
 
+// ── Código Novios — Linkify (transferencia bancaria) ───────────────
+// Flujo validado en producción (Yeppo): URL determinística SIN pre-crear cobro.
+// Al abrir la URL, Linkify llama GET cobro-info (amount/description) y, al validar
+// la transferencia, POST notification con HMAC. Evita el salto a "Validando" por
+// cobro pre-existente y el problema del RUT en "Cuenta de origen".
+
+const LINKIFY_PAY_BASE = 'https://app.linkify.cl/pay';
+
+function linkifyPayUrl(invoiceId) {
+  return `${LINKIFY_PAY_BASE}/${LINKIFY_MERCHANT}/remote/${invoiceId}`;
+}
+
+// HMAC sha256 (hex) sobre contenido crudo; header X-Linkify-Confirmation.
+function verifyLinkifyHmac(content, header) {
+  if (!LINKIFY_PRIVATE_KEY || !header) return false;
+  const expected = crypto.createHmac('sha256', LINKIFY_PRIVATE_KEY).update(content).digest('hex');
+  const a = Buffer.from(expected, 'utf8');
+  const b = Buffer.from(String(header).toLowerCase(), 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function normalizeRut(rut) {
+  let r = String(rut || '').replace(/\./g, '').replace(/\s/g, '').toUpperCase();
+  const m = /^(\d{1,8})([0-9K])$/.exec(r);
+  if (m) r = `${m[1]}-${m[2]}`;
+  return r;
+}
+
+// POST /api/codigonovios/regalar-linkify — crea fila pendiente y devuelve URL determinística
+app.post('/api/codigonovios/regalar-linkify', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const slug = (b.slug || '').toUpperCase().trim();
+    const montoNeto = parseInt(b.monto_neto, 10);
+    const deseoId = b.deseo_id ? parseInt(b.deseo_id, 10) : null;
+    if (!slug || !montoNeto || montoNeto < 1000) {
+      return res.status(400).json({ error: 'slug y monto_neto (>= 1000) requeridos' });
+    }
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const r = await pg.query('SELECT * FROM cn_novios WHERE slug = $1', [slug]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
+    const n = r.rows[0];
+    if (n.estado !== 'activa') return res.status(403).json({ error: 'Lista no activa' });
+    if (deseoId) {
+      const d = await pg.query('SELECT id FROM cn_deseos WHERE id = $1 AND novio_id = $2', [deseoId, n.id]);
+      if (d.rows.length === 0) return res.status(404).json({ error: 'Deseo no encontrado' });
+    }
+    const comision = Math.round(montoNeto * 0.10);
+    const montoTotal = montoNeto + comision;
+    const ins = await pg.query(
+      `WITH ins AS (
+         INSERT INTO cn_regalos (deseo_id, novio_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'pendiente') RETURNING id
+       )
+       UPDATE cn_regalos SET linkify_invoice_id = 'cn-' || ins.id
+       FROM ins WHERE cn_regalos.id = ins.id
+       RETURNING cn_regalos.id`,
+      [deseoId, n.id, b.nombre_invitado || null, b.mensaje || null, montoNeto, comision, montoTotal]
+    );
+    const regaloId = ins.rows[0].id;
+    const invoiceId = `cn-${regaloId}`;
+    res.json({
+      ok: true,
+      regalo_id: regaloId,
+      monto_neto: montoNeto,
+      comision,
+      monto_total: montoTotal,
+      pay_url: linkifyPayUrl(invoiceId),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/codigonovios/webhook/linkify?encoded_data={"id":"cn-123"} — info del cobro
+app.get('/api/codigonovios/webhook/linkify', async (req, res) => {
+  try {
+    const encoded = req.query.encoded_data;
+    if (!verifyLinkifyHmac(encoded, req.headers['x-linkify-confirmation'])) {
+      console.error('Linkify cobro-info: HMAC inválido');
+      return res.status(401).json({ message: 'Firma inválida' });
+    }
+    let parsed;
+    try { parsed = JSON.parse(encoded); } catch { return res.status(400).json({ message: 'encoded_data inválido' }); }
+    const m = /^cn-(\d+)$/.exec(String(parsed.id || ''));
+    if (!m) return res.status(400).json({ message: 'id inválido' });
+    const regaloId = parseInt(m[1], 10);
+    if (!pg) return res.status(500).json({ message: 'Postgres no configurado' });
+    const r = await pg.query('SELECT monto_total, novio_id FROM cn_regalos WHERE id = $1', [regaloId]);
+    if (r.rows.length === 0) return res.status(400).json({ message: 'No se pudo obtener el cobro', notify_merchant: true });
+    const g = r.rows[0];
+    const nr = await pg.query('SELECT nombre_novio, nombre_novia FROM cn_novios WHERE id = $1', [g.novio_id]);
+    const nov = nr.rows[0] || {};
+    const description = `Regalo boda ${nov.nombre_novio || ''} & ${nov.nombre_novia || ''}`.trim() || `Regalo #${regaloId}`;
+    return res.json({ amount: g.monto_total, description, currency: 'CLP' });
+  } catch (err) {
+    console.error('Linkify cobro-info error:', err.message);
+    return res.status(500).json({ message: 'Error interno' });
+  }
+});
+
+// POST /api/codigonovios/webhook/linkify — notificación de pago confirmado/anulado
+app.post('/api/codigonovios/webhook/linkify', async (req, res) => {
+  try {
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
+    if (!verifyLinkifyHmac(rawBody, req.headers['x-linkify-confirmation'])) {
+      console.error('Linkify notification: HMAC inválido');
+      return res.status(401).json({ message: 'Firma inválida' });
+    }
+    const payload = req.body || {};
+    const { id, action, completeness, original_amount, transfers } = payload;
+    console.log('Linkify notification', { id, action, completeness, original_amount });
+
+    if (action === 'cancellation') {
+      return res.json({ status: 'accepted', message: 'Pago anulado' });
+    }
+    if (action !== 'notification') {
+      return res.json({ status: 'accepted', message: 'OK' });
+    }
+    if (completeness === 'underpaid') {
+      return res.json({ status: 'accepted', message: 'Monto inferior al cobro', restart: true });
+    }
+    const m = /^cn-(\d+)$/.exec(String(id || ''));
+    if (!m) return res.json({ status: 'accepted', message: 'id no reconocido' });
+    const regaloId = parseInt(m[1], 10);
+    if (!pg) return res.json({ status: 'accepted', message: 'Postgres no configurado' });
+
+    const r = await pg.query('SELECT monto_total FROM cn_regalos WHERE id = $1', [regaloId]);
+    if (r.rows.length === 0) return res.json({ status: 'accepted', message: 'Regalo no encontrado' });
+    const montoTotal = r.rows[0].monto_total;
+    if (original_amount != null && Number(original_amount) < montoTotal) {
+      return res.json({ status: 'accepted', message: 'Monto insuficiente', restart: true });
+    }
+
+    const rutInvitado = (Array.isArray(transfers) && transfers[0]) ? normalizeRut(transfers[0].rut) : null;
+    // Idempotencia: UPDATE atómico condicional — solo si aún está pendiente.
+    const up = await pg.query(
+      `UPDATE cn_regalos SET estado = 'pagado', pagado_at = NOW(), rut_invitado = COALESCE($2, rut_invitado)
+       WHERE id = $1 AND estado = 'pendiente'
+       RETURNING id, novio_id, deseo_id, monto_neto`,
+      [regaloId, rutInvitado]
+    );
+    if (up.rows.length > 0) {
+      const g = up.rows[0];
+      if (g.deseo_id) {
+        await pg.query('UPDATE cn_deseos SET monto_recaudado = monto_recaudado + $1 WHERE id = $2', [g.monto_neto, g.deseo_id]);
+      }
+      await notifySlack(`🏦 *REGALO PAGADO (transferencia)* (Código Novios): $${g.monto_neto.toLocaleString('es-CL')} · regalo #${g.id}`);
+    }
+    return res.json({ status: 'accepted', message: 'Pago recibido' });
+  } catch (err) {
+    console.error('Linkify notification error:', err.message);
+    return res.status(500).json({ message: 'Error interno' });
+  }
+});
+
 // ── Panel Novios Web (codigonovios.cl/admin.php) — Fase A ───────────
-const crypto = require('crypto');
 
 // Hash de contraseña con scrypt (Node nativo, sin dependencias)
 function hashPassword(pass) {
