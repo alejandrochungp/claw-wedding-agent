@@ -2185,7 +2185,7 @@ app.post('/api/codigonovios/webhook/mp', async (req, res) => {
     // Idempotencia: solo marca pagado si aún no tiene este payment id
     const up = await pg.query(
       `UPDATE cn_regalos SET estado = 'pagado', pagado_at = NOW(), mp_payment_id = $1
-       WHERE id = $2 AND (mp_payment_id IS NULL OR mp_payment_id = $1)
+       WHERE id = $2 AND mp_payment_id IS NULL AND estado = 'pendiente'
        RETURNING id, novio_id, deseo_id, monto_neto`,
       [String(paymentId), regaloId]
     );
@@ -2320,17 +2320,13 @@ app.post('/api/codigonovios/regalar-linkify', async (req, res) => {
     const comision = Math.round(montoNeto * 0.10);
     const montoTotal = montoNeto + comision;
     const ins = await pg.query(
-      `WITH ins AS (
-         INSERT INTO cn_regalos (deseo_id, novio_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'pendiente') RETURNING id
-       )
-       UPDATE cn_regalos SET linkify_invoice_id = 'cn-' || ins.id
-       FROM ins WHERE cn_regalos.id = ins.id
-       RETURNING cn_regalos.id`,
+      `INSERT INTO cn_regalos (deseo_id, novio_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pendiente') RETURNING id`,
       [deseoId, n.id, b.nombre_invitado || null, b.mensaje || null, montoNeto, comision, montoTotal]
     );
     const regaloId = ins.rows[0].id;
     const invoiceId = `cn-${regaloId}`;
+    await pg.query(`UPDATE cn_regalos SET linkify_invoice_id = $1 WHERE id = $2`, [invoiceId, regaloId]);
     res.json({
       ok: true,
       regalo_id: regaloId,
