@@ -2366,7 +2366,8 @@ app.get('/api/codigonovios/webhook/linkify', async (req, res) => {
     const g = r.rows[0];
     const nr = await pg.query('SELECT nombre_novio, nombre_novia FROM cn_novios WHERE id = $1', [g.novio_id]);
     const nov = nr.rows[0] || {};
-    const description = `Regalo boda ${nov.nombre_novio || ''} & ${nov.nombre_novia || ''}`.trim() || `Regalo #${regaloId}`;
+    const descBase = `Regalo boda ${nov.nombre_novio || ''} & ${nov.nombre_novia || ''}`.trim() || `Regalo #${regaloId}`;
+    const description = `${descBase} — Total a transferir: ${Number(g.monto_total).toLocaleString('es-CL')} CLP (incluye comisión 10%)`;
     return res.json({ amount: g.monto_total, description, currency: 'CLP' });
   } catch (err) {
     console.error('Linkify cobro-info error:', err.message);
@@ -2392,9 +2393,6 @@ app.post('/api/codigonovios/webhook/linkify', async (req, res) => {
     if (action !== 'notification') {
       return res.json({ status: 'accepted', message: 'OK' });
     }
-    if (completeness === 'underpaid') {
-      return res.json({ status: 'accepted', message: 'Monto inferior al cobro', restart: true });
-    }
     const m = /^cn-(\d+)$/.exec(String(id || ''));
     if (!m) return res.json({ status: 'accepted', message: 'id no reconocido' });
     const regaloId = parseInt(m[1], 10);
@@ -2403,8 +2401,12 @@ app.post('/api/codigonovios/webhook/linkify', async (req, res) => {
     const r = await pg.query('SELECT monto_total FROM cn_regalos WHERE id = $1', [regaloId]);
     if (r.rows.length === 0) return res.json({ status: 'accepted', message: 'Regalo no encontrado' });
     const montoTotal = r.rows[0].monto_total;
-    if (original_amount != null && Number(original_amount) < montoTotal) {
-      return res.json({ status: 'accepted', message: 'Monto insuficiente', restart: true });
+
+    if (completeness === 'underpaid' || (original_amount != null && Number(original_amount) < montoTotal)) {
+      const recibido = (Array.isArray(transfers) && transfers[0] && transfers[0].amount) || original_amount || '?';
+      console.warn(`Linkify underpaid cn-${regaloId}: esperado $${montoTotal}, recibido $${recibido}`);
+      try { await notifySlack(`⚠️ Transferencia incompleta (Código Novios) regalo #${regaloId}: se esperaban $${Number(montoTotal).toLocaleString('es-CL')} y llegó $${recibido}. El invitado puede reintentar en Linkify.`); } catch (e) {}
+      return res.json({ status: 'accepted', message: 'Monto inferior al total del regalo. Transfiere el total exacto.', restart: true });
     }
 
     const rutInvitado = (Array.isArray(transfers) && transfers[0]) ? normalizeRut(transfers[0].rut) : null;
