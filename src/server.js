@@ -2102,13 +2102,18 @@ app.get('/api/codigonovios/lista/:slug', async (req, res) => {
       "SELECT id, nombre, descripcion, foto_url, precio_sugerido, monto_total, monto_recaudado FROM cn_deseos WHERE novio_id = $1 AND estado = 'activo' ORDER BY orden, id",
       [n.id]
     );
-    const totalRecaudado = deseos.rows.reduce((s, d) => s + (d.monto_recaudado || 0), 0);
+    const libres = await pg.query(
+      "SELECT COALESCE(SUM(monto_neto),0) AS total FROM cn_regalos WHERE novio_id = $1 AND estado = 'pagado' AND deseo_id IS NULL",
+      [n.id]
+    );
+    const totalRecaudado = deseos.rows.reduce((s, d) => s + (d.monto_recaudado || 0), 0) + parseInt(libres.rows[0].total, 10);
     res.json({
       slug: n.slug,
       novios: `${n.nombre_novio || ''} & ${n.nombre_novia || ''}`,
       fecha_boda: n.fecha_boda,
       activa_hasta: n.activa_hasta,
       total_recaudado: totalRecaudado,
+      aportes_libres: parseInt(libres.rows[0].total, 10),
       deseos: deseos.rows,
     });
   } catch (err) {
@@ -2204,12 +2209,12 @@ app.post('/api/codigonovios/webhook/mp', async (req, res) => {
   }
 });
 
-// GET /admin/cn/detalle/:slug — panel novios (regalos recibidos + total)
-app.get('/admin/cn/detalle/:slug', async (req, res) => {
+// GET /admin/cn/detalle/:slug — panel novios (regalos recibidos + total) — requiere token
+app.get('/admin/cn/detalle/:slug', requireAdminToken, async (req, res) => {
   try {
     const slug = (req.params.slug || '').toUpperCase().trim();
     if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
-    const r = await pg.query('SELECT * FROM cn_novios WHERE slug = $1', [slug]);
+    const r = await pg.query('SELECT id, slug, nombre_novio, nombre_novia, fecha_boda, telefono_novio, email, estado, activa_hasta, created_at FROM cn_novios WHERE slug = $1', [slug]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
     const n = r.rows[0];
     const regalos = await pg.query('SELECT id, deseo_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado, pagado_at, created_at FROM cn_regalos WHERE novio_id = $1 ORDER BY id DESC', [n.id]);
@@ -2221,9 +2226,11 @@ app.get('/admin/cn/detalle/:slug', async (req, res) => {
   }
 });
 
-// POST /admin/cn/setup — crear/actualizar lista piloto + deseos (idempotente, C1)
+// POST /admin/cn/setup — crear/actualizar lista piloto + deseos (idempotente, C1) — requiere secreto admin
 app.post('/admin/cn/setup', async (req, res) => {
   try {
+    const secret = (req.headers['x-admin-secret'] || '').toString();
+    if (secret !== CN_ADMIN_SECRET) return res.status(401).json({ error: 'No autorizado' });
     const b = req.body || {};
     const slug = (b.slug || 'ALEJKUIL').toUpperCase().trim();
     const deseos = Array.isArray(b.deseos) ? b.deseos : [];
@@ -2463,7 +2470,7 @@ function verifyAdminToken(token, slug) {
 function requireAdminToken(req, res, next) {
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  const slug = ((req.body && req.body.slug) || req.query.slug || '').toUpperCase().trim();
+  const slug = ((req.body && req.body.slug) || req.query.slug || req.params.slug || '').toUpperCase().trim();
   if (!token || !slug || !verifyAdminToken(token, slug)) {
     return res.status(401).json({ error: 'No autorizado' });
   }
