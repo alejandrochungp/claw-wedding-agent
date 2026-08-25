@@ -2376,30 +2376,45 @@ app.get('/api/codigonovios/webhook/linkify', async (req, res) => {
 });
 
 // POST /api/codigonovios/webhook/linkify — notificación de pago confirmado/anulado
-app.post('/api/codigonovios/webhook/linkify', async (req, res) => {
+// FAST-ACK: respondemos 200 de inmediato tras validar HMAC + payload y procesamos el
+// marcado de pago en background. Evita el "Problema de notificación" de Linkify por
+// timeout (misma causa raíz y fix que la integración Yeppo).
+app.post('/api/codigonovios/webhook/linkify', (req, res) => {
+  const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
+  if (!verifyLinkifyHmac(rawBody, req.headers['x-linkify-confirmation'])) {
+    console.error('Linkify notification: HMAC inválido');
+    return res.status(401).json({ message: 'Firma inválida' });
+  }
+  const payload = req.body || {};
+  const { id, action, completeness, original_amount, transfers } = payload;
+  console.log('Linkify notification', { id, action, completeness, original_amount });
+
+  if (action === 'cancellation') {
+    return res.json({ status: 'accepted', message: 'Pago anulado' });
+  }
+  if (action !== 'notification') {
+    return res.json({ status: 'accepted', message: 'OK' });
+  }
+  const m = /^cn-(\d+)$/.exec(String(id || ''));
+  if (!m) return res.json({ status: 'accepted', message: 'id no reconocido' });
+  const regaloId = parseInt(m[1], 10);
+
+  if (completeness === 'underpaid') {
+    processLinkifyNotification(regaloId, { underpaid: true, original_amount, transfers }).catch((e) => console.error('Linkify bg underpaid:', e.message));
+    return res.json({ status: 'accepted', message: 'Monto inferior al total del regalo. Transfiere el total exacto.', restart: true });
+  }
+
+  // exact / overpaid → fast-ack + marcado en background
+  res.json({ status: 'accepted', message: 'Pago recibido, procesando' });
+  processLinkifyNotification(regaloId, { underpaid: false, original_amount, transfers }).catch((e) => console.error('Linkify bg process:', e.message));
+});
+
+// Procesamiento en background del pago Linkify (marcar pagado + Slack).
+async function processLinkifyNotification(regaloId, opts) {
   try {
-    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
-    if (!verifyLinkifyHmac(rawBody, req.headers['x-linkify-confirmation'])) {
-      console.error('Linkify notification: HMAC inválido');
-      return res.status(401).json({ message: 'Firma inválida' });
-    }
-    const payload = req.body || {};
-    const { id, action, completeness, original_amount, transfers } = payload;
-    console.log('Linkify notification', { id, action, completeness, original_amount });
-
-    if (action === 'cancellation') {
-      return res.json({ status: 'accepted', message: 'Pago anulado' });
-    }
-    if (action !== 'notification') {
-      return res.json({ status: 'accepted', message: 'OK' });
-    }
-    const m = /^cn-(\d+)$/.exec(String(id || ''));
-    if (!m) return res.json({ status: 'accepted', message: 'id no reconocido' });
-    const regaloId = parseInt(m[1], 10);
-    if (!pg) return res.json({ status: 'accepted', message: 'Postgres no configurado' });
-
+    if (!pg) return;
     const r = await pg.query('SELECT monto_total FROM cn_regalos WHERE id = $1', [regaloId]);
-    if (r.rows.length === 0) return res.json({ status: 'accepted', message: 'Regalo no encontrado' });
+    if (r.rows.length === 0) return;
     const montoTotal = r.rows[0].monto_total;
 
     // Parse tolerante de montos CLP: acepta "1.100" (miles) y "1100" sin confundirlos con decimales.
@@ -2410,14 +2425,14 @@ app.post('/api/codigonovios/webhook/linkify', async (req, res) => {
       return digits ? parseInt(digits, 10) : null;
     };
 
-    if (completeness === 'underpaid' || (parseCLP(original_amount) != null && parseCLP(original_amount) < montoTotal)) {
-      const recibido = (Array.isArray(transfers) && transfers[0] && transfers[0].amount) || original_amount || '?';
+    if (opts.underpaid || (parseCLP(opts.original_amount) != null && parseCLP(opts.original_amount) < montoTotal)) {
+      const recibido = (Array.isArray(opts.transfers) && opts.transfers[0] && opts.transfers[0].amount) || opts.original_amount || '?';
       console.warn(`Linkify underpaid cn-${regaloId}: esperado $${montoTotal}, recibido $${recibido}`);
       try { await notifySlack(`⚠️ Transferencia incompleta (Código Novios) regalo #${regaloId}: se esperaban $${Number(montoTotal).toLocaleString('es-CL')} y llegó $${recibido}. El invitado puede reintentar en Linkify.`); } catch (e) {}
-      return res.json({ status: 'accepted', message: 'Monto inferior al total del regalo. Transfiere el total exacto.', restart: true });
+      return;
     }
 
-    const rutInvitado = (Array.isArray(transfers) && transfers[0]) ? normalizeRut(transfers[0].rut) : null;
+    const rutInvitado = (Array.isArray(opts.transfers) && opts.transfers[0]) ? normalizeRut(opts.transfers[0].rut) : null;
     // Idempotencia: UPDATE atómico condicional — solo si aún está pendiente.
     const up = await pg.query(
       `UPDATE cn_regalos SET estado = 'pagado', pagado_at = NOW(), rut_invitado = COALESCE($2, rut_invitado)
@@ -2430,14 +2445,12 @@ app.post('/api/codigonovios/webhook/linkify', async (req, res) => {
       if (g.deseo_id) {
         await pg.query('UPDATE cn_deseos SET monto_recaudado = monto_recaudado + $1 WHERE id = $2', [g.monto_neto, g.deseo_id]);
       }
-      await notifySlack(`🏦 *REGALO PAGADO (transferencia)* (Código Novios): $${g.monto_neto.toLocaleString('es-CL')} · regalo #${g.id}`);
+      try { await notifySlack(`🏦 *REGALO PAGADO (transferencia)* (Código Novios): $${g.monto_neto.toLocaleString('es-CL')} · regalo #${g.id}`); } catch (e) {}
     }
-    return res.json({ status: 'accepted', message: 'Pago recibido' });
   } catch (err) {
-    console.error('Linkify notification error:', err.message);
-    return res.status(500).json({ message: 'Error interno' });
+    console.error('Linkify notification bg error:', err.message);
   }
-});
+}
 
 // ── Panel Novios Web (codigonovios.cl/admin.php) — Fase A ───────────
 
