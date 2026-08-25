@@ -2402,7 +2402,15 @@ app.post('/api/codigonovios/webhook/linkify', async (req, res) => {
     if (r.rows.length === 0) return res.json({ status: 'accepted', message: 'Regalo no encontrado' });
     const montoTotal = r.rows[0].monto_total;
 
-    if (completeness === 'underpaid' || (original_amount != null && Number(original_amount) < montoTotal)) {
+    // Parse tolerante de montos CLP: acepta "1.100" (miles) y "1100" sin confundirlos con decimales.
+    const parseCLP = (v) => {
+      if (v == null || v === '') return null;
+      if (typeof v === 'number') return Math.round(v);
+      const digits = String(v).replace(/[^\d]/g, '');
+      return digits ? parseInt(digits, 10) : null;
+    };
+
+    if (completeness === 'underpaid' || (parseCLP(original_amount) != null && parseCLP(original_amount) < montoTotal)) {
       const recibido = (Array.isArray(transfers) && transfers[0] && transfers[0].amount) || original_amount || '?';
       console.warn(`Linkify underpaid cn-${regaloId}: esperado $${montoTotal}, recibido $${recibido}`);
       try { await notifySlack(`⚠️ Transferencia incompleta (Código Novios) regalo #${regaloId}: se esperaban $${Number(montoTotal).toLocaleString('es-CL')} y llegó $${recibido}. El invitado puede reintentar en Linkify.`); } catch (e) {}
