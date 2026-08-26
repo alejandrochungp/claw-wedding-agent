@@ -38,6 +38,7 @@ const CN_SMTP_PORT = parseInt(process.env.CN_SMTP_PORT || '465', 10);
 const CN_SMTP_USER = process.env.CN_SMTP_USER || 'novios@aconcaguacapital.cl';
 const CN_SMTP_PASS = process.env.CN_SMTP_PASS || '';
 const CN_SMTP_FROM = process.env.CN_SMTP_FROM || 'Código Novios <novios@aconcaguacapital.cl>';
+const CN_SMTP_REPLY_TO = process.env.CN_SMTP_REPLY_TO || 'novios@aconcaguacapital.cl';
 
 const META_API = 'https://graph.facebook.com/v22.0';
 const SLACK_API = 'https://slack.com/api';
@@ -2347,13 +2348,26 @@ async function sendGuestConfirmation(regaloId) {
         <p><a href="${CN_SITE_URL}/n/${g.slug}" style="color:#a0674b">Ver la lista de regalos</a></p>
         <p style="color:#999;font-size:12px;margin-top:24px">— Código Novios</p>
       </div>`;
-    await m.sendMail({ from: CN_SMTP_FROM, to: g.email_invitado, replyTo: CN_SMTP_USER, subject, text, html });
+    await m.sendMail({ from: CN_SMTP_FROM, to: g.email_invitado, replyTo: CN_SMTP_REPLY_TO, subject, text, html });
     await pg.query('UPDATE cn_regalos SET notificado_invitado = TRUE WHERE id = $1', [regaloId]);
     console.log(`📧 Confirmación enviada a ${g.email_invitado} (regalo #${regaloId})`);
   } catch (e) {
     console.error('📧 sendGuestConfirmation error:', e.message);
   }
 }
+
+// POST /api/codigonovios/admin/reenviar-email/:id — reenvío manual de confirmación (admin)
+app.post('/api/codigonovios/admin/reenviar-email/:id', async (req, res) => {
+  if (req.headers['x-cn-admin-secret'] !== CN_ADMIN_SECRET) {
+    return res.status(401).json({ error: 'no autorizado' });
+  }
+  const id = parseInt(req.params.id, 10);
+  if (!id || !pg) return res.status(400).json({ error: 'id inválido o Postgres no configurado' });
+  const r = await pg.query('UPDATE cn_regalos SET notificado_invitado = FALSE WHERE id = $1 RETURNING id', [id]);
+  if (r.rows.length === 0) return res.status(404).json({ error: 'regalo no encontrado' });
+  await sendGuestConfirmation(id);
+  res.json({ ok: true, regalo_id: id });
+});
 
 // ── Código Novios — Linkify (transferencia bancaria) ───────────────
 // Flujo validado en producción (Yeppo): URL determinística SIN pre-crear cobro.
