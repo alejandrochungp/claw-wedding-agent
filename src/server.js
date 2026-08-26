@@ -2298,7 +2298,7 @@ function getMailer() {
   mailer = nodemailer.createTransport({
     host: CN_SMTP_HOST,
     port: CN_SMTP_PORT,
-    secure: CN_SMTP_PORT === 465,
+    secure: CN_SMTP_PORT === 465 || CN_SMTP_PORT === 443,
     auth: { user: CN_SMTP_USER, pass: CN_SMTP_PASS },
     connectionTimeout: 20000,
   });
