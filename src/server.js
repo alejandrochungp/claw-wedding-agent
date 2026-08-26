@@ -8,6 +8,7 @@ const Redis = require('ioredis');
 const axios = require('axios');
 const { Pool } = require('pg');
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(express.json({ type: ['application/json', 'text/plain', 'application/*+json'], verify: (req, _res, buf) => { req.rawBody = buf; } }));
@@ -32,6 +33,11 @@ const CN_SITE_URL = process.env.CN_SITE_URL || 'https://codigonovios.cl';
 const LINKIFY_MERCHANT = process.env.LINKIFY_MERCHANT || '4V9PdORjokOya1Y'; // Linkify (Código Novios)
 const LINKIFY_PRIVATE_KEY = process.env.LINKIFY_PRIVATE_KEY || ''; // HMAC webhook Linkify
 const CN_ADMIN_SECRET = process.env.CN_ADMIN_SECRET || 'cn_admin_secret_2026'; // firma tokens panel novios
+const CN_SMTP_HOST = process.env.CN_SMTP_HOST || 'mail.aconcaguacapital.cl';
+const CN_SMTP_PORT = parseInt(process.env.CN_SMTP_PORT || '465', 10);
+const CN_SMTP_USER = process.env.CN_SMTP_USER || 'novios@aconcaguacapital.cl';
+const CN_SMTP_PASS = process.env.CN_SMTP_PASS || '';
+const CN_SMTP_FROM = process.env.CN_SMTP_FROM || 'Código Novios <novios@aconcaguacapital.cl>';
 
 const META_API = 'https://graph.facebook.com/v22.0';
 const SLACK_API = 'https://slack.com/api';
@@ -144,6 +150,7 @@ async function initPostgres() {
     await pg.query('CREATE INDEX IF NOT EXISTS idx_cn_regalos_estado ON cn_regalos(estado)');
     await pg.query('ALTER TABLE cn_regalos ADD COLUMN IF NOT EXISTS linkify_invoice_id TEXT');
     await pg.query('ALTER TABLE cn_regalos ADD COLUMN IF NOT EXISTS rut_invitado TEXT');
+    await pg.query('ALTER TABLE cn_regalos ADD COLUMN IF NOT EXISTS email_invitado TEXT');
     await pg.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_cn_regalos_linkify_invoice ON cn_regalos(linkify_invoice_id)');
     console.log('✅ Postgres listo — tablas leads + cn_* creadas/verificadas');
   } catch (err) {
@@ -2143,9 +2150,9 @@ app.post('/api/codigonovios/regalar', async (req, res) => {
     const comision = Math.round(montoNeto * 0.10);
     const montoTotal = montoNeto + comision;
     const ins = await pg.query(
-      `INSERT INTO cn_regalos (deseo_id, novio_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pendiente') RETURNING id`,
-      [deseoId, n.id, b.nombre_invitado || null, b.mensaje || null, montoNeto, comision, montoTotal]
+      `INSERT INTO cn_regalos (deseo_id, novio_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, email_invitado, estado)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pendiente') RETURNING id`,
+      [deseoId, n.id, b.nombre_invitado || null, b.mensaje || null, montoNeto, comision, montoTotal, b.email_invitado || null]
     );
     const regaloId = ins.rows[0].id;
     if (!MP_ACCESS_TOKEN) {
@@ -2196,10 +2203,16 @@ app.post('/api/codigonovios/webhook/mp', async (req, res) => {
     );
     if (up.rows.length > 0) {
       const g = up.rows[0];
+      // Backfill email del invitado desde Checkout Pro si no se capturó en el form
+      const payerEmail = (p.payer && p.payer.email) || null;
+      if (payerEmail) {
+        await pg.query('UPDATE cn_regalos SET email_invitado = COALESCE(email_invitado, $1) WHERE id = $2', [payerEmail, regaloId]);
+      }
       if (g.deseo_id) {
         await pg.query('UPDATE cn_deseos SET monto_recaudado = monto_recaudado + $1 WHERE id = $2', [g.monto_neto, g.deseo_id]);
       }
       await notifySlack(`🎁 *REGALO PAGADO* (Código Novios): $${g.monto_neto.toLocaleString('es-CL')} · regalo #${g.id}`);
+      sendGuestConfirmation(regaloId).catch((e) => console.error('confirm mp bg:', e.message));
       // TODO C2: avisar al novio por WhatsApp
     }
     res.status(200).send('ok');
@@ -2276,6 +2289,72 @@ app.post('/admin/cn/setup', async (req, res) => {
   }
 });
 
+// ── Email de confirmación al invitado (novios@aconcaguacapital.cl) ──
+let mailer = null;
+function getMailer() {
+  if (mailer) return mailer;
+  if (!CN_SMTP_USER || !CN_SMTP_PASS) return null;
+  mailer = nodemailer.createTransport({
+    host: CN_SMTP_HOST,
+    port: CN_SMTP_PORT,
+    secure: CN_SMTP_PORT === 465,
+    auth: { user: CN_SMTP_USER, pass: CN_SMTP_PASS },
+    connectionTimeout: 20000,
+  });
+  return mailer;
+}
+
+async function sendGuestConfirmation(regaloId) {
+  try {
+    if (!pg) return;
+    const r = await pg.query(
+      `SELECT r.nombre_invitado, r.email_invitado, r.monto_neto, r.comision, r.monto_total,
+              r.notificado_invitado, n.nombre_novio, n.nombre_novia, n.slug
+       FROM cn_regalos r JOIN cn_novios n ON n.id = r.novio_id WHERE r.id = $1`,
+      [regaloId]
+    );
+    const g = r.rows[0];
+    if (!g || !g.email_invitado || g.notificado_invitado) return;
+    const m = getMailer();
+    if (!m) { console.warn('📧 Mailer no configurado (CN_SMTP_USER/PASS ausentes)'); return; }
+    const novios = [g.nombre_novio, g.nombre_novia].filter(Boolean).join(' & ') || 'los novios';
+    const nombre = (g.nombre_invitado || '').trim();
+    const fmt = (n) => '$' + Number(n || 0).toLocaleString('es-CL');
+    const subject = `¡Gracias por tu regalo${nombre ? ', ' + nombre : ''}! 💍`;
+    const text = [
+      `¡Gracias${nombre ? ' ' + nombre : ''}! Tu regalo para ${novios} quedó registrado y pagado.`,
+      '',
+      `• Tu regalo: ${fmt(g.monto_neto)}`,
+      `• Comisión de la plataforma (10%): ${fmt(g.comision)}`,
+      `• Total pagado: ${fmt(g.monto_total)}`,
+      '',
+      `Los novios reciben el 100% de tu regalo (${fmt(g.monto_neto)}).`,
+      '',
+      `Puedes ver la lista aquí: ${CN_SITE_URL}/n/${g.slug}`,
+      '',
+      '— Código Novios',
+    ].join('\n');
+    const html = `
+      <div style="font-family:Georgia,'Times New Roman',serif;max-width:560px;margin:0 auto;color:#2b2b2b">
+        <h2 style="color:#a0674b;margin-bottom:4px">¡Gracias${nombre ? ', ' + nombre : ''}! 💍</h2>
+        <p>Tu regalo para <strong>${novios}</strong> quedó registrado y pagado.</p>
+        <table style="width:100%;border-collapse:collapse;margin:18px 0">
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee">Tu regalo</td><td style="text-align:right;font-weight:bold">${fmt(g.monto_neto)}</td></tr>
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Comisión de la plataforma (10%)</td><td style="text-align:right;color:#888">${fmt(g.comision)}</td></tr>
+          <tr><td style="padding:8px 0">Total pagado</td><td style="text-align:right;font-weight:bold">${fmt(g.monto_total)}</td></tr>
+        </table>
+        <p style="color:#555">Los novios reciben el <strong>100% de tu regalo</strong> (${fmt(g.monto_neto)}).</p>
+        <p><a href="${CN_SITE_URL}/n/${g.slug}" style="color:#a0674b">Ver la lista de regalos</a></p>
+        <p style="color:#999;font-size:12px;margin-top:24px">— Código Novios</p>
+      </div>`;
+    await m.sendMail({ from: CN_SMTP_FROM, to: g.email_invitado, replyTo: CN_SMTP_USER, subject, text, html });
+    await pg.query('UPDATE cn_regalos SET notificado_invitado = TRUE WHERE id = $1', [regaloId]);
+    console.log(`📧 Confirmación enviada a ${g.email_invitado} (regalo #${regaloId})`);
+  } catch (e) {
+    console.error('📧 sendGuestConfirmation error:', e.message);
+  }
+}
+
 // ── Código Novios — Linkify (transferencia bancaria) ───────────────
 // Flujo validado en producción (Yeppo): URL determinística SIN pre-crear cobro.
 // Al abrir la URL, Linkify llama GET cobro-info (amount/description) y, al validar
@@ -2327,9 +2406,9 @@ app.post('/api/codigonovios/regalar-linkify', async (req, res) => {
     const comision = Math.round(montoNeto * 0.10);
     const montoTotal = montoNeto + comision;
     const ins = await pg.query(
-      `INSERT INTO cn_regalos (deseo_id, novio_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, estado)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pendiente') RETURNING id`,
-      [deseoId, n.id, b.nombre_invitado || null, b.mensaje || null, montoNeto, comision, montoTotal]
+      `INSERT INTO cn_regalos (deseo_id, novio_id, nombre_invitado, mensaje, monto_neto, comision, monto_total, email_invitado, estado)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pendiente') RETURNING id`,
+      [deseoId, n.id, b.nombre_invitado || null, b.mensaje || null, montoNeto, comision, montoTotal, b.email_invitado || null]
     );
     const regaloId = ins.rows[0].id;
     const invoiceId = `cn-${regaloId}`;
@@ -2446,6 +2525,7 @@ async function processLinkifyNotification(regaloId, opts) {
         await pg.query('UPDATE cn_deseos SET monto_recaudado = monto_recaudado + $1 WHERE id = $2', [g.monto_neto, g.deseo_id]);
       }
       try { await notifySlack(`🏦 *REGALO PAGADO (transferencia)* (Código Novios): $${g.monto_neto.toLocaleString('es-CL')} · regalo #${g.id}`); } catch (e) {}
+      sendGuestConfirmation(regaloId).catch((e) => console.error('confirm linkify bg:', e.message));
     }
   } catch (err) {
     console.error('Linkify notification bg error:', err.message);
