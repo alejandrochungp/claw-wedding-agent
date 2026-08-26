@@ -2458,7 +2458,7 @@ app.get('/api/codigonovios/webhook/linkify', async (req, res) => {
 // FAST-ACK: respondemos 200 de inmediato tras validar HMAC + payload y procesamos el
 // marcado de pago en background. Evita el "Problema de notificación" de Linkify por
 // timeout (misma causa raíz y fix que la integración Yeppo).
-app.post('/api/codigonovios/webhook/linkify', (req, res) => {
+app.post('/api/codigonovios/webhook/linkify', async (req, res) => {
   const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
   if (!verifyLinkifyHmac(rawBody, req.headers['x-linkify-confirmation'])) {
     console.error('Linkify notification: HMAC inválido');
@@ -2483,8 +2483,28 @@ app.post('/api/codigonovios/webhook/linkify', (req, res) => {
     return res.json({ status: 'accepted', message: 'Monto inferior al total del regalo. Transfiere el total exacto.', restart: true });
   }
 
-  // exact / overpaid → fast-ack + marcado en background
-  res.json({ status: 'accepted', message: 'Pago recibido, procesando' });
+  // exact / overpaid → fast-ack + redirect a la página de agradecimiento.
+  // Linkify redirige al usuario a la URL indicada en `redirect` una vez validado el pago
+  // (doc "Pago confirmado (Remoto)" — campo `redirect`). El slug es un SELECT rápido;
+  // le ponemos tope de 2s para no romper el fast-ack si la DB se cuelga.
+  let redirect = null;
+  if (pg) {
+    try {
+      const slug = await Promise.race([
+        (async () => {
+          const r = await pg.query('SELECT n.slug FROM cn_regalos r JOIN cn_novios n ON n.id = r.novio_id WHERE r.id = $1', [regaloId]);
+          return (r.rows[0] && r.rows[0].slug) || null;
+        })(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('slug timeout')), 2000)),
+      ]);
+      if (slug) redirect = `${CN_SITE_URL}/n/${slug}?ok=1`;
+    } catch (e) {
+      console.error('Linkify redirect slug:', e.message);
+    }
+  }
+  const resp = { status: 'accepted', message: 'Pago recibido, procesando' };
+  if (redirect) resp.redirect = redirect;
+  res.json(resp);
   processLinkifyNotification(regaloId, { underpaid: false, original_amount, transfers }).catch((e) => console.error('Linkify bg process:', e.message));
 });
 
