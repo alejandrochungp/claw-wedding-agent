@@ -1,5 +1,5 @@
 // claw-wedding-agent — WhatsApp Wedding Planner Bot
-// v1.8.0 — Minisitio autoadministrable (F1: cn_minisitio + API + upload Bluehost)
+// v1.8.1 - Minisitio autoadministrable (F1 + fix B1/A2/M3: 2026-08-27)
 // Repo canónico: softifycl/claw-wedding-agent
 // Mirror (Railway): alejandrochungp/claw-wedding-agent
 
@@ -3242,7 +3242,9 @@ app.get('/api/minisitio/admin/:slug', requireMinisitioToken, async (req, res) =>
 
 // PUT /api/minisitio/admin/:slug — patch con whitelist, validación por campo,
 // snapshot en cn_minisitio_historial (rollback <5 min), upsert, removidos y Slack.
-// draft/publish: PUT sin publicar:true → estado 'borrador'; publicar:true → 'publicada'.
+// draft/publish (M3): publicar:true → 'publicada'; publicar:false → 'borrador' explícito.
+// Un PUT de contenido SIN publicar PRESERVA el estado actual (editar un sitio
+// publicado no lo baja a borrador).
 app.put('/api/minisitio/admin/:slug', requireMinisitioToken, async (req, res) => {
   let client = null;
   let fila = null;
@@ -3302,7 +3304,11 @@ app.put('/api/minisitio/admin/:slug', requireMinisitioToken, async (req, res) =>
             updVals.push(campos[k]);
           }
         }
-        const nuevoEstado = publicar === true ? 'publicada' : 'borrador';
+        // M3 (fix 2026-08-27): update de contenido NO baja el estado — solo
+        // publicar:false explícito (botón "Pasar a borrador") cambia a borrador.
+        const nuevoEstado = publicar === true ? 'publicada'
+          : (publicar === false ? 'borrador'
+            : (filaAnterior.estado || 'borrador'));
         updCols.push(`estado = $${updVals.length + 1}`);
         updVals.push(nuevoEstado);
         updCols.push('updated_at = NOW()');
@@ -3398,7 +3404,7 @@ async function start() {
   await migrateGuestsToListHash(); // F1: lista → hash (compatibilidad con invitados viejos)
 
   app.listen(PORT, () => {
-    console.log(`💒 claw-wedding-agent v1.8.0 running on port ${PORT}`);
+    console.log(`💒 claw-wedding-agent v1.8.1 running on port ${PORT}`);
     console.log(`   Tenant:          ${TENANT.id}`);
     console.log(`   Health:          http://localhost:${PORT}/status`);
     console.log(`   Webhook WA:      http://localhost:${PORT}/webhook`);
