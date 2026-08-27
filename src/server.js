@@ -1,5 +1,5 @@
 // claw-wedding-agent — WhatsApp Wedding Planner Bot
-// v1.6.1 — DeepSeek Flash RSVP + auto-replies + Mateo Slack App
+// v1.8.0 — Minisitio autoadministrable (F1: cn_minisitio + API + upload Bluehost)
 // Repo canónico: softifycl/claw-wedding-agent
 // Mirror (Railway): alejandrochungp/claw-wedding-agent
 
@@ -9,8 +9,12 @@ const axios = require('axios');
 const { Pool } = require('pg');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
+// Railway proxea las peticiones: sin esto req.ip es la IP interna de Railway para TODOS
+// y el rate-limit de login colapsa en una sola llave (F1 minisitio, H5 auditoría).
+app.set('trust proxy', 1);
 app.use(express.json({ type: ['application/json', 'text/plain', 'application/*+json'], verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 // ── Config ───────────────────────────────────────────────────
@@ -33,6 +37,9 @@ const CN_SITE_URL = process.env.CN_SITE_URL || 'https://codigonovios.cl';
 const LINKIFY_MERCHANT = process.env.LINKIFY_MERCHANT || '4V9PdORjokOya1Y'; // Linkify (Código Novios)
 const LINKIFY_PRIVATE_KEY = process.env.LINKIFY_PRIVATE_KEY || ''; // HMAC webhook Linkify
 const CN_ADMIN_SECRET = process.env.CN_ADMIN_SECRET || 'cn_admin_secret_2026'; // firma tokens panel novios
+// Minisitio autoadministrable (F1): secreto PROPIO, SIN default → fail closed.
+// Si Railway no lo setea, el proceso aborta con exit 1 (nunca arranca sin firma).
+const MINISITIO_ADMIN_SECRET = process.env.MINISITIO_ADMIN_SECRET;
 const CN_SMTP_HOST = process.env.CN_SMTP_HOST || 'mail.aconcaguacapital.cl';
 const CN_SMTP_PORT = parseInt(process.env.CN_SMTP_PORT || '465', 10);
 const CN_SMTP_USER = process.env.CN_SMTP_USER || 'novios@aconcaguacapital.cl';
@@ -153,7 +160,74 @@ async function initPostgres() {
     await pg.query('ALTER TABLE cn_regalos ADD COLUMN IF NOT EXISTS rut_invitado TEXT');
     await pg.query('ALTER TABLE cn_regalos ADD COLUMN IF NOT EXISTS email_invitado TEXT');
     await pg.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_cn_regalos_linkify_invoice ON cn_regalos(linkify_invoice_id)');
-    console.log('✅ Postgres listo — tablas leads + cn_* creadas/verificadas');
+    // ── Minisitio nupcial autoadministrable (F1, 27-ago-2026) ────────────────
+    // 1 fila por boda. Solo campos PROPIOS del micrositio; identidad/fecha/contacto
+    // viven en cn_novios (fuente única). estado = draft/publish (decisión orquestador):
+    //   'borrador' → el sitio público responde 404 (no publicado)
+    //   'publicada' → visible
+    //   'pausada'  → 403 (mismo patrón que /api/codigonovios/lista/:slug)
+    await pg.query(`
+      CREATE TABLE IF NOT EXISTS cn_minisitio (
+        id              SERIAL PRIMARY KEY,
+        novio_id        INT UNIQUE NOT NULL REFERENCES cn_novios(id) ON DELETE CASCADE,
+        codigo_slug     TEXT UNIQUE NOT NULL REFERENCES cn_novios(slug) ON DELETE CASCADE,
+        minisitio_slug  TEXT UNIQUE NOT NULL,
+        estado          TEXT NOT NULL DEFAULT 'borrador'
+          CHECK (estado IN ('borrador','publicada','pausada')),
+        hora            TEXT
+          CHECK (hora IS NULL OR hora ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
+        lugar           TEXT,
+        dress_code      TEXT,
+        estacionamiento TEXT,
+        plus_one        TEXT,
+        contacto        TEXT,
+        hero_img        TEXT,
+        video_url       TEXT,
+        cronograma      JSONB NOT NULL DEFAULT '[]'
+          CHECK (jsonb_typeof(cronograma) = 'array' AND jsonb_array_length(cronograma) <= 15),
+        faq             JSONB NOT NULL DEFAULT '[]'
+          CHECK (jsonb_typeof(faq) = 'array' AND jsonb_array_length(faq) <= 10),
+        timeline        JSONB NOT NULL DEFAULT '[]'
+          CHECK (jsonb_typeof(timeline) = 'array' AND jsonb_array_length(timeline) <= 15),
+        galeria         JSONB NOT NULL DEFAULT '[]'
+          CHECK (jsonb_typeof(galeria) = 'array' AND jsonb_array_length(galeria) <= 10),
+        regalos         JSONB NOT NULL DEFAULT '{}'
+          CHECK (jsonb_typeof(regalos) = 'object'),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    // Upgrade idempotente del CHECK de estado (si la tabla ya existía con el CHECK viejo)
+    await pg.query('ALTER TABLE cn_minisitio DROP CONSTRAINT IF EXISTS cn_minisitio_estado_check');
+    await pg.query("ALTER TABLE cn_minisitio ADD CONSTRAINT cn_minisitio_estado_check CHECK (estado IN ('borrador','publicada','pausada'))");
+    // Trigger: updated_at automático
+    await pg.query(`
+      CREATE OR REPLACE FUNCTION cn_set_updated_at() RETURNS trigger AS $$
+      BEGIN
+        NEW.updated_at = NOW();
+        RETURN NEW;
+      END $$ LANGUAGE plpgsql
+    `);
+    await pg.query('DROP TRIGGER IF EXISTS trg_cn_minisitio_updated ON cn_minisitio');
+    await pg.query(`
+      CREATE TRIGGER trg_cn_minisitio_updated
+        BEFORE UPDATE ON cn_minisitio
+        FOR EACH ROW EXECUTE FUNCTION cn_set_updated_at()
+    `);
+    // Historial: snapshot del estado ANTERIOR en cada PUT admin (rollback manual <5 min)
+    await pg.query(`
+      CREATE TABLE IF NOT EXISTS cn_minisitio_historial (
+        id                 SERIAL PRIMARY KEY,
+        novio_id           INT NOT NULL REFERENCES cn_novios(id) ON DELETE CASCADE,
+        minisitio_slug     TEXT NOT NULL,
+        campos_anteriores  JSONB NOT NULL,
+        campos_nuevos      JSONB,
+        autor              TEXT NOT NULL DEFAULT 'novio',
+        motivo             TEXT,
+        ts                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pg.query('CREATE INDEX IF NOT EXISTS idx_cn_minisitio_historial_novio_ts ON cn_minisitio_historial(novio_id, ts DESC)');
+    console.log('✅ Postgres listo — tablas leads + cn_* + cn_minisitio creadas/verificadas');
   } catch (err) {
     console.error('❌ Postgres init error:', err.message);
   }
@@ -311,7 +385,7 @@ app.get('/status', async (_req, res) => {
   res.json({
     status: 'ok',
     name: 'claw-wedding-agent',
-    version: '1.7.0',
+    version: '1.8.0',
     uptime: Math.floor(process.uptime()),
     node: process.version,
     tenant: TENANT.id,
@@ -2089,9 +2163,21 @@ app.post('/admin/clean-names', async (req, res) => {
 
 // ── Código Novios (codigonovios.cl) — Fase C1 ───────────────
 // CORS: Bluehost (sitio estático) llama a esta API desde el browser
+// F1: agregado PUT — sin él, "Guardar datos"/"Cambiar contraseña" del panel
+// fallan en navegador (preflight OPTIONS bloqueado). Fix retroactivo H14.
 app.use('/api/codigonovios', (_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (_req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+// ── Minisitio autoadministrable (F1) — CORS propio ──────────
+// Editor (Bluehost, mismo origin) + sitio público; el PUT requiere preflight.
+app.use('/api/minisitio', (_req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (_req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -2582,40 +2668,59 @@ function verifyPassword(pass, stored) {
   return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(test, 'hex'));
 }
 
-// Token HMAC: slug + expiración, firmado con CN_ADMIN_SECRET
-function makeAdminToken(slug) {
+// Token HMAC: slug + expiración, firmado con un secret (CN o minisitio, F1)
+function makeAdminToken(slug, secret) {
   const exp = Date.now() + 24 * 3600 * 1000; // 24h
   const payload = `${slug}.${exp}`;
-  const sig = crypto.createHmac('sha256', CN_ADMIN_SECRET).update(payload).digest('hex');
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
   return Buffer.from(`${payload}.${sig}`).toString('base64url');
 }
 
-function verifyAdminToken(token, slug) {
+function verifyAdminToken(token, slug, secret) {
   try {
     const decoded = Buffer.from(token, 'base64url').toString();
     const [tokSlug, expStr, sig] = decoded.split('.');
     if (tokSlug !== slug) return false;
     if (Date.now() > parseInt(expStr, 10)) return false;
-    const expected = crypto.createHmac('sha256', CN_ADMIN_SECRET).update(`${tokSlug}.${expStr}`).digest('hex');
+    const expected = crypto.createHmac('sha256', secret).update(`${tokSlug}.${expStr}`).digest('hex');
     return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'));
   } catch (e) {
     return false;
   }
 }
 
+// ── Rate-limit escalonado de login (F1, H5): 5/min → 15/15min → 60/hora ──
+// Cada ventana es un contador independiente; al fallar se agota la de 1 min,
+// luego la de 15 y finalmente la de 60. Llave = SLUG:IP (nunca lanza).
+const cnLoginLimiter60 = rateLimit({ windowMs: 60 * 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => `${String((req.body && req.body.slug) || 'anon').toUpperCase().slice(0, 20)}:${req.ip}` });
+const cnLoginLimiter15 = rateLimit({ windowMs: 15 * 60 * 1000, limit: 15, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => `${String((req.body && req.body.slug) || 'anon').toUpperCase().slice(0, 20)}:${req.ip}` });
+const cnLoginLimiter = rateLimit({ windowMs: 60 * 1000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => `${String((req.body && req.body.slug) || 'anon').toUpperCase().slice(0, 20)}:${req.ip}` });
+
 // Middleware: valida token del panel novios
 function requireAdminToken(req, res, next) {
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   const slug = ((req.body && req.body.slug) || req.query.slug || req.params.slug || '').toUpperCase().trim();
-  if (!token || !slug || !verifyAdminToken(token, slug)) {
+  if (!token || !slug || !verifyAdminToken(token, slug, CN_ADMIN_SECRET)) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  next();
+}
+
+// Middleware: valida token del editor del minisitio (secret propio, slug = :slug)
+function requireMinisitioToken(req, res, next) {
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const slug = ((req.params && req.params.slug) || '').toUpperCase().trim();
+  if (!token || !slug || !verifyAdminToken(token, slug, MINISITIO_ADMIN_SECRET)) {
     return res.status(401).json({ error: 'No autorizado' });
   }
   next();
 }
 
 // POST /api/codigonovios/admin/login — valida contraseña y entrega token 24h
-app.post('/api/codigonovios/admin/login', async (req, res) => {
+// F1: rate-limit escalonado 5/min → 15/15min → 60/hora (H5, mismo fix que minisitio)
+app.post('/api/codigonovios/admin/login', cnLoginLimiter60, cnLoginLimiter15, cnLoginLimiter, async (req, res) => {
   try {
     const b = req.body || {};
     const slug = (b.slug || '').toUpperCase().trim();
@@ -2628,7 +2733,7 @@ app.post('/api/codigonovios/admin/login', async (req, res) => {
     if (!verifyPassword(pass, r.rows[0].password_hash)) {
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
-    res.json({ ok: true, token: makeAdminToken(slug), slug });
+    res.json({ ok: true, token: makeAdminToken(slug, CN_ADMIN_SECRET), slug });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2780,8 +2885,508 @@ app.post('/api/codigonovios/admin/regalos', requireAdminToken, async (req, res) 
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// Minisitio autoadministrable (F1, 27-ago-2026)
+// Contrato: tmp/design_minisitio_backend.md §3 · decisiones orquestador: fotos
+// Bluehost /uploads/{slug}/, slug unificado bajo codigonovios.cl, draft/publish
+// (borrador + botón Publicar) vía columna estado, piloto ALEJKUIL.
+//   GET  /api/minisitio/:slug              público (no-cache + ETag + 304)
+//   POST /api/minisitio/admin/login        rate-limit escalonado 5/15/60
+//   GET  /api/minisitio/admin/:slug        token (compartidos + editable + permisos)
+//   PUT  /api/minisitio/admin/:slug        token (whitelist + validación + snapshot + draft/publish)
+//   POST /api/minisitio/admin/validate-token  helper para upload.php (Bluehost)
+// Regla de oro: NINGÚN endpoint serializa password_hash, banco, tipo_cuenta,
+// numero_cuenta, titular, rut_titular (payout) ni email/telefono en GET público.
+// ══════════════════════════════════════════════════════════════
+
+// Whitelist estricta de campos editables (spec §3; anti mass-assignment).
+// estado/codigo_slug/minisitio_slug/id/novio_id/updated_at NO están → rechazo 400.
+const MS_ALLOWED = ['hora','lugar','dress_code','estacionamiento','plus_one','contacto',
+                    'hero_img','video_url','cronograma','faq','timeline','galeria','regalos'];
+const MS_PERMISOS = {
+  editable: MS_ALLOWED,
+  solo_lectura: ['nombre_novio','nombre_novia','fecha_boda','telefono_novio','email','estado'],
+};
+const MS_JSONB_COLS = ['cronograma','faq','timeline','galeria','regalos'];
+const HHMM_RE = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+const MS_UUID_JPG_RE = /^[0-9a-f]{32}\.jpg$/;
+
+function msEsUrlHttp(v) {
+  try { const u = new URL(String(v)); return u.protocol === 'http:' || u.protocol === 'https:'; } catch (e) { return false; }
+}
+
+function msTieneHtml(v) { return /[<>]/.test(String(v)); }
+
+function msTexto(v, max, key, fail) {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') fail('debe ser texto');
+  const s = v.trim();
+  if (s === '') return null;
+  if (s.length > max) fail(`máximo ${max} caracteres`);
+  if (msTieneHtml(s)) fail('caracteres < > no permitidos');
+  return s;
+}
+
+function msUrl(v, max, key, fail) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  if (s === '') return null;
+  if (s.length > max) fail(`máximo ${max} caracteres`);
+  if (!msEsUrlHttp(s)) fail('solo URLs http(s)');
+  return s;
+}
+
+function validarMsCronograma(v, key, fail) {
+  if (v === null || v === undefined) return [];
+  if (!Array.isArray(v)) fail('debe ser array');
+  if (v.length > 15) fail('máximo 15 items');
+  return v.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) fail('item debe ser objeto');
+    for (const k of Object.keys(item)) if (k !== 'hora' && k !== 'actividad') fail(`clave desconocida "${k}"`);
+    const hora = item.hora === undefined || item.hora === null ? '' : String(item.hora).trim();
+    if (hora !== '' && !HHMM_RE.test(hora)) fail('hora debe ser HH:MM');
+    const actividad = String(item.actividad ?? '').trim();
+    if (!actividad) fail('actividad requerida');
+    if (actividad.length > 300) fail('actividad máx 300 caracteres');
+    return { hora, actividad };
+  });
+}
+
+function validarMsFaq(v, key, fail) {
+  if (v === null || v === undefined) return [];
+  if (!Array.isArray(v)) fail('debe ser array');
+  if (v.length > 10) fail('máximo 10 items');
+  return v.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) fail('item debe ser objeto');
+    for (const k of Object.keys(item)) if (k !== 'pregunta' && k !== 'respuesta') fail(`clave desconocida "${k}"`);
+    const pregunta = String(item.pregunta ?? '').trim();
+    const respuesta = String(item.respuesta ?? '').trim();
+    if (!pregunta) fail('pregunta requerida');
+    if (pregunta.length > 500) fail('pregunta máx 500 caracteres');
+    if (!respuesta) fail('respuesta requerida');
+    if (respuesta.length > 2000) fail('respuesta máx 2000 caracteres');
+    if (msTieneHtml(pregunta) || msTieneHtml(respuesta)) fail('caracteres < > no permitidos');
+    return { pregunta, respuesta };
+  });
+}
+
+function validarMsTimeline(v, key, fail) {
+  if (v === null || v === undefined) return [];
+  if (!Array.isArray(v)) fail('debe ser array');
+  if (v.length > 15) fail('máximo 15 items');
+  return v.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) fail('item debe ser objeto');
+    for (const k of Object.keys(item)) if (k !== 'fecha' && k !== 'texto') fail(`clave desconocida "${k}"`);
+    const fecha = String(item.fecha ?? '').trim();
+    const texto = String(item.texto ?? '').trim();
+    if (!fecha || fecha.length > 100) fail('fecha requerida (máx 100)');
+    if (!texto || texto.length > 500) fail('texto requerido (máx 500)');
+    if (msTieneHtml(fecha) || msTieneHtml(texto)) fail('caracteres < > no permitidos');
+    return { fecha, texto };
+  });
+}
+
+function validarMsGaleria(v, key, fail) {
+  if (v === null || v === undefined) return [];
+  if (!Array.isArray(v)) fail('debe ser array');
+  if (v.length > 10) fail('máximo 10 fotos');
+  let portadas = 0;
+  const out = v.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) fail('item debe ser objeto');
+    for (const k of Object.keys(item)) if (k !== 'url' && k !== 'portada') fail(`clave desconocida "${k}"`);
+    const url = String(item.url ?? '').trim();
+    if (!url || url.length > 2000 || !msEsUrlHttp(url)) fail('url debe ser http(s)');
+    const portada = item.portada === true;
+    if (portada) portadas++;
+    return { url, portada };
+  });
+  if (portadas > 1) fail('máximo 1 foto marcada como portada');
+  return out;
+}
+
+function validarMsRegalos(v, key, fail) {
+  if (v === null || v === undefined) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) fail('debe ser objeto');
+  const allowed = ['mesa','codigo','link','tiendas','internacional'];
+  for (const k of Object.keys(v)) if (!allowed.includes(k)) fail(`clave desconocida "${k}" en regalos`);
+  const out = {};
+  out.mesa = v.mesa === true;
+  if (v.codigo !== undefined && v.codigo !== null) {
+    const c = String(v.codigo).trim().toUpperCase();
+    if (c !== '' && !/^[A-Z0-9]{3,12}$/.test(c)) fail('codigo debe ser ^[A-Z0-9]{3,12}$');
+    if (c !== '') out.codigo = c;
+  }
+  if (v.link !== undefined && v.link !== null && String(v.link).trim() !== '') {
+    const l = String(v.link).trim();
+    if (l.length > 2000 || !msEsUrlHttp(l)) fail('link debe ser URL http(s)');
+    out.link = l;
+  }
+  if (v.tiendas !== undefined && v.tiendas !== null) {
+    if (!Array.isArray(v.tiendas)) fail('tiendas debe ser array');
+    if (v.tiendas.length > 5) fail('máximo 5 tiendas');
+    out.tiendas = v.tiendas.map((t) => {
+      if (!t || typeof t !== 'object' || Array.isArray(t)) fail('tienda debe ser objeto');
+      for (const k of Object.keys(t)) if (k !== 'tienda' && k !== 'numero') fail(`clave desconocida "${k}" en tienda`);
+      const tienda = String(t.tienda ?? '').trim();
+      const numero = String(t.numero ?? '').trim();
+      if (tienda.length > 100) fail('tienda máx 100 caracteres');
+      if (numero.length > 50) fail('numero máx 50 caracteres');
+      if (msTieneHtml(tienda) || msTieneHtml(numero)) fail('caracteres < > no permitidos');
+      return { tienda, numero };
+    });
+  }
+  if (v.internacional !== undefined && v.internacional !== null) {
+    if (!Array.isArray(v.internacional)) fail('internacional debe ser array');
+    if (v.internacional.length > 5) fail('máximo 5 métodos');
+    out.internacional = v.internacional.map((m) => {
+      if (!m || typeof m !== 'object' || Array.isArray(m)) fail('método debe ser objeto');
+      for (const k of Object.keys(m)) if (k !== 'plataforma' && k !== 'dato') fail(`clave desconocida "${k}" en internacional`);
+      const plataforma = String(m.plataforma ?? '').trim();
+      const dato = String(m.dato ?? '').trim();
+      if (plataforma.length > 50) fail('plataforma máx 50 caracteres');
+      if (dato.length > 500) fail('dato máx 500 caracteres');
+      if (msTieneHtml(plataforma) || msTieneHtml(dato)) fail('caracteres < > no permitidos');
+      return { plataforma, dato };
+    });
+  }
+  return out;
+}
+
+function validarMsCampo(key, v) {
+  const fail = (detalle) => { throw Object.assign(new Error(detalle), { campo: key, detalle }); };
+  switch (key) {
+    case 'hora': {
+      if (v === null || v === undefined) return null;
+      const s = String(v).trim();
+      if (s === '') return null;
+      if (!HHMM_RE.test(s)) fail('formato HH:MM');
+      return s;
+    }
+    case 'lugar': return msTexto(v, 2000, key, fail);
+    case 'dress_code': return msTexto(v, 500, key, fail);
+    case 'estacionamiento': return msTexto(v, 1000, key, fail);
+    case 'plus_one': return msTexto(v, 500, key, fail);
+    case 'contacto': return msTexto(v, 100, key, fail);
+    case 'hero_img': return msUrl(v, 2000, key, fail);
+    case 'video_url': return msUrl(v, 2000, key, fail);
+    case 'cronograma': return validarMsCronograma(v, key, fail);
+    case 'faq': return validarMsFaq(v, key, fail);
+    case 'timeline': return validarMsTimeline(v, key, fail);
+    case 'galeria': return validarMsGaleria(v, key, fail);
+    case 'regalos': return validarMsRegalos(v, key, fail);
+    default: return null;
+  }
+}
+
+// Valida el body del PUT: whitelist estricta + reglas por campo.
+// Devuelve { campos, publicar } (publicar = true|false|undefined).
+// Clave `publicar` es control de estado (draft/publish), NO columna.
+function validarMinisitioBody(body) {
+  const b = body || {};
+  const campos = {};
+  let publicar;
+  for (const key of Object.keys(b)) {
+    if (key === 'publicar') {
+      if (typeof b[key] !== 'boolean') throw Object.assign(new Error('publicar debe ser boolean'), { campo: 'publicar', detalle: 'true|false' });
+      publicar = b[key];
+      continue;
+    }
+    if (!MS_ALLOWED.includes(key)) {
+      throw Object.assign(new Error('campo no permitido'), { campo: key, detalle: null });
+    }
+    campos[key] = validarMsCampo(key, b[key]);
+  }
+  if (Object.keys(campos).length === 0 && publicar === undefined) {
+    throw Object.assign(new Error('sin campos para actualizar'), { campo: null, detalle: null });
+  }
+  return { campos, publicar };
+}
+
+async function msResolverNovio(slugInput) {
+  const r = await pg.query(
+    `SELECT n.id, n.slug, n.nombre_novio, n.nombre_novia, n.fecha_boda, n.telefono_novio, n.email, n.estado, n.password_hash
+       FROM cn_novios n
+       LEFT JOIN cn_minisitio m ON m.novio_id = n.id
+      WHERE upper(n.slug) = upper($1) OR lower(m.minisitio_slug) = lower($1)
+      ORDER BY (upper(n.slug) = upper($1)) DESC
+      LIMIT 1`,
+    [String(slugInput || '').trim()]
+  );
+  return r.rows[0] || null;
+}
+
+async function msGetMinisitio(novioId) {
+  const r = await pg.query('SELECT * FROM cn_minisitio WHERE novio_id = $1', [novioId]);
+  return r.rows[0] || null;
+}
+
+// GET /api/minisitio/:slug — público (sin auth). Columnas explícitas: NUNCA PII.
+app.get('/api/minisitio/:slug', async (req, res) => {
+  try {
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const q = String(req.params.slug || '').trim();
+    if (!q) return res.status(404).json({ error: 'Minisitio no encontrado' });
+    const r = await pg.query(
+      `SELECT m.*, n.slug, n.nombre_novio, n.nombre_novia, n.fecha_boda, n.estado AS estado_cn
+         FROM cn_minisitio m JOIN cn_novios n ON n.id = m.novio_id
+        WHERE lower(m.minisitio_slug) = lower($1) OR upper(n.slug) = upper($1)
+        ORDER BY (lower(m.minisitio_slug) = lower($1)) DESC
+        LIMIT 1`,
+      [q]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Minisitio no encontrado' });
+    const m = r.rows[0];
+    if (m.estado_cn === 'pausada' || m.estado === 'pausada') return res.status(403).json({ error: 'Lista pausada' });
+    // draft/publish: el borrador NO es visible para invitados
+    if (m.estado === 'borrador') return res.status(404).json({ error: 'Minisitio no publicado' });
+    const etag = `"${new Date(m.updated_at).getTime()}"`;
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('ETag', etag);
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    res.json({
+      slug: m.slug,
+      minisitio_slug: m.minisitio_slug,
+      estado: m.estado,
+      nombre_novio: m.nombre_novio,
+      nombre_novia: m.nombre_novia,
+      fecha_boda: m.fecha_boda,
+      hora: m.hora,
+      lugar: m.lugar,
+      dress_code: m.dress_code,
+      estacionamiento: m.estacionamiento,
+      plus_one: m.plus_one,
+      contacto: m.contacto,
+      hero_img: m.hero_img,
+      video_url: m.video_url,
+      cronograma: m.cronograma || [],
+      faq: m.faq || [],
+      timeline: m.timeline || [],
+      galeria: m.galeria || [],
+      regalos: m.regalos || {},
+      updated_at: m.updated_at,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/minisitio/admin/login — reutiliza cn_novios.password_hash (scrypt).
+// Rate-limit escalonado 5/min → 15/15min → 60/hora por slug+IP.
+app.post('/api/minisitio/admin/login', cnLoginLimiter60, cnLoginLimiter15, cnLoginLimiter, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const slugIn = String(b.slug || '').trim();
+    const pass = b.password || '';
+    if (!slugIn || !pass) return res.status(400).json({ error: 'slug y password requeridos' });
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const n = await msResolverNovio(slugIn);
+    if (!n) return res.status(404).json({ error: 'Lista no encontrada' });
+    if (!n.password_hash) return res.status(403).json({ error: 'Esta lista no tiene contraseña configurada' });
+    if (!verifyPassword(pass, n.password_hash)) return res.status(401).json({ error: 'Contraseña incorrecta' });
+    const m = await msGetMinisitio(n.id);
+    res.json({
+      ok: true,
+      token: makeAdminToken(n.slug, MINISITIO_ADMIN_SECRET),
+      slug: n.slug,
+      minisitio_slug: m ? m.minisitio_slug : null,
+      exp: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/minisitio/admin/:slug — datos completos para el editor (token).
+app.get('/api/minisitio/admin/:slug', requireMinisitioToken, async (req, res) => {
+  try {
+    const slug = (req.params.slug || '').toUpperCase().trim();
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    const nr = await pg.query('SELECT id, slug, nombre_novio, nombre_novia, fecha_boda, telefono_novio, email, estado FROM cn_novios WHERE slug = $1', [slug]);
+    if (nr.rows.length === 0) return res.status(404).json({ error: 'Lista no encontrada' });
+    const n = nr.rows[0];
+    const m = await msGetMinisitio(n.id);
+    res.json({
+      slug: n.slug,
+      minisitio_slug: m ? m.minisitio_slug : null,
+      estado: m ? m.estado : null,
+      compartidos: {
+        nombre_novio: n.nombre_novio,
+        nombre_novia: n.nombre_novia,
+        fecha_boda: n.fecha_boda,
+        telefono_novio: n.telefono_novio,
+        email: n.email,
+        estado_cn: n.estado,
+      },
+      editable: {
+        hora: m ? m.hora : null,
+        lugar: m ? m.lugar : null,
+        dress_code: m ? m.dress_code : null,
+        estacionamiento: m ? m.estacionamiento : null,
+        plus_one: m ? m.plus_one : null,
+        contacto: m ? m.contacto : null,
+        hero_img: m ? m.hero_img : null,
+        video_url: m ? m.video_url : null,
+        cronograma: m ? (m.cronograma || []) : [],
+        faq: m ? (m.faq || []) : [],
+        timeline: m ? (m.timeline || []) : [],
+        galeria: m ? (m.galeria || []) : [],
+        regalos: m ? (m.regalos || {}) : {},
+      },
+      updated_at: m ? m.updated_at : null,
+      permisos: MS_PERMISOS,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/minisitio/admin/:slug — patch con whitelist, validación por campo,
+// snapshot en cn_minisitio_historial (rollback <5 min), upsert, removidos y Slack.
+// draft/publish: PUT sin publicar:true → estado 'borrador'; publicar:true → 'publicada'.
+app.put('/api/minisitio/admin/:slug', requireMinisitioToken, async (req, res) => {
+  let client = null;
+  let fila = null;
+  let filaAnterior = null;
+  try {
+    const slug = (req.params.slug || '').toUpperCase().trim();
+    if (!pg) return res.status(500).json({ error: 'Postgres no configurado' });
+    let validado;
+    try {
+      validado = validarMinisitioBody(req.body);
+    } catch (e) {
+      return res.status(400).json({ error: e.message, campo: e.campo || undefined, detalle: e.detalle || undefined });
+    }
+    const { campos, publicar } = validado;
+
+    client = await pg.connect();
+    try {
+      await client.query('BEGIN');
+      const nr = await client.query('SELECT id, slug FROM cn_novios WHERE upper(slug) = upper($1)', [slug]);
+      if (nr.rows.length === 0) {
+        await client.query('ROLLBACK');
+        client.release(); client = null;
+        return res.status(404).json({ error: 'Lista no encontrada' });
+      }
+      const novioId = nr.rows[0].id;
+
+      const mr = await client.query('SELECT * FROM cn_minisitio WHERE novio_id = $1 FOR UPDATE', [novioId]);
+      filaAnterior = mr.rows[0] || null;
+
+      if (!filaAnterior) {
+        // Upsert: fila no existe → INSERT. El seed siempre crea la fila antes de dar
+        // acceso al editor; este camino cubre bodas provisionadas por script.
+        let minisitioSlug = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        console.log(`⚠️ minisitio: PUT sin fila previa — minisitio_slug derivado '${minisitioSlug}' para ${slug} (confirmar con Alejandro)`);
+        const cols = ['novio_id', 'codigo_slug', 'minisitio_slug', 'estado'];
+        const vals = [novioId, slug, minisitioSlug, publicar === true ? 'publicada' : 'borrador'];
+        for (const k of MS_ALLOWED) if (k in campos) { cols.push(k); vals.push(campos[k]); }
+        const sql = `INSERT INTO cn_minisitio (${cols.join(', ')})
+          VALUES (${cols.map((c, i) => `$${i + 1}${MS_JSONB_COLS.includes(c) ? '::jsonb' : ''}`).join(', ')})
+          RETURNING *`;
+        const ins = await client.query(sql, vals);
+        fila = ins.rows[0];
+      } else {
+        // Snapshot del estado ANTERIOR (excl. id/novio_id) para rollback manual
+        const snapshot = { ...filaAnterior };
+        delete snapshot.id;
+        delete snapshot.novio_id;
+        await client.query(
+          'INSERT INTO cn_minisitio_historial (novio_id, minisitio_slug, campos_anteriores, campos_nuevos, autor, motivo) VALUES ($1,$2,$3,NULL,$4,$5)',
+          [novioId, filaAnterior.minisitio_slug, JSON.stringify(snapshot), 'novio', 'guardar_seccion']
+        );
+        const updCols = [];
+        const updVals = [];
+        for (const k of MS_ALLOWED) {
+          if (k in campos) {
+            updCols.push(`${k} = $${updVals.length + 1}${MS_JSONB_COLS.includes(k) ? '::jsonb' : ''}`);
+            updVals.push(campos[k]);
+          }
+        }
+        const nuevoEstado = publicar === true ? 'publicada' : 'borrador';
+        updCols.push(`estado = $${updVals.length + 1}`);
+        updVals.push(nuevoEstado);
+        updCols.push('updated_at = NOW()');
+        const up = await client.query(
+          `UPDATE cn_minisitio SET ${updCols.join(', ')} WHERE novio_id = $${updVals.length + 1} RETURNING *`,
+          [...updVals, novioId]
+        );
+        fila = up.rows[0];
+      }
+      await client.query('COMMIT');
+      client.release(); client = null;
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (e) { /* noop */ }
+      throw err;
+    }
+
+    // Anti-huérfanos (D1/H7.8): URLs propias de /uploads/{slug}/ reemplazadas o quitadas
+    const removidos = [];
+    if (fila && filaAnterior) {
+      const msSlug = fila.minisitio_slug;
+      const esPropia = (url) => {
+        try {
+          const u = new URL(String(url));
+          const parts = u.pathname.split('/');
+          return parts.includes('uploads') && parts.includes(msSlug) && MS_UUID_JPG_RE.test(parts[parts.length - 1]);
+        } catch (e) { return false; }
+      };
+      if (filaAnterior.hero_img && campos.hero_img !== undefined && filaAnterior.hero_img !== campos.hero_img && esPropia(filaAnterior.hero_img)) {
+        removidos.push(filaAnterior.hero_img);
+      }
+      if (campos.galeria !== undefined) {
+        const viejas = (filaAnterior.galeria || []).map((g) => (typeof g === 'string' ? g : g.url));
+        const nuevas = (campos.galeria || []).map((g) => g.url);
+        for (const v of viejas) if (!nuevas.includes(v) && esPropia(v)) removidos.push(v);
+      }
+    }
+
+    const camposCambiados = Object.keys(campos).join(', ');
+    try { await notifySlack(`✏️ *Minisitio actualizado* (${slug}): ${camposCambiados || 'solo estado'} — ${new Date().toISOString()}`); } catch (e) { /* noop */ }
+    console.log(`✏️ minisitio PUT ${slug}: campos=${camposCambiados || '-'} estado=${fila.estado}`);
+    res.json({ ok: true, slug, updated_at: fila.updated_at, estado: fila.estado, removidos });
+  } catch (err) {
+    if (client) { try { await client.query('ROLLBACK'); } catch (e) { /* noop */ } client.release(); }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/minisitio/admin/validate-token — helper para upload.php/cleanup.php
+// (Bluehost no tiene el secret; valida acá y devuelve el código CN resuelto).
+app.post('/api/minisitio/admin/validate-token', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const token = String(b.token || '');
+    const slugIn = String(b.slug || '').trim();
+    if (!token || !slugIn) return res.status(400).json({ error: 'token y slug requeridos' });
+    let slug = slugIn.toUpperCase().trim();
+    let minisitio_slug = null;
+    if (pg) {
+      try {
+        const r = await pg.query(
+          `SELECT n.slug AS codigo, m.minisitio_slug FROM cn_novios n
+             LEFT JOIN cn_minisitio m ON m.novio_id = n.id
+            WHERE upper(n.slug) = upper($1) OR lower(m.minisitio_slug) = lower($1)
+            ORDER BY (upper(n.slug) = upper($1)) DESC
+            LIMIT 1`,
+          [slugIn.trim()]
+        );
+        if (r.rows[0]) { slug = r.rows[0].codigo; minisitio_slug = r.rows[0].minisitio_slug || null; }
+      } catch (e) { /* noop */ }
+    }
+    if (!verifyAdminToken(token, slug, MINISITIO_ADMIN_SECRET)) return res.status(401).json({ error: 'No autorizado' });
+    res.json({ ok: true, slug, minisitio_slug });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ───────────────────────────────────────────────────
 async function start() {
+  // F1: fail-closed — sin MINISITIO_ADMIN_SECRET el servicio NO arranca (H11)
+  if (!MINISITIO_ADMIN_SECRET) {
+    console.error('❌ MINISITIO_ADMIN_SECRET no está configurado — abortando (fail closed)');
+    process.exit(1);
+  }
   try {
     await redis.connect();
     console.log('✅ Redis connected');
@@ -2793,7 +3398,7 @@ async function start() {
   await migrateGuestsToListHash(); // F1: lista → hash (compatibilidad con invitados viejos)
 
   app.listen(PORT, () => {
-    console.log(`💒 claw-wedding-agent v1.7.0 running on port ${PORT}`);
+    console.log(`💒 claw-wedding-agent v1.8.0 running on port ${PORT}`);
     console.log(`   Tenant:          ${TENANT.id}`);
     console.log(`   Health:          http://localhost:${PORT}/status`);
     console.log(`   Webhook WA:      http://localhost:${PORT}/webhook`);
