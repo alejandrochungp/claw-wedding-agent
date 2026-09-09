@@ -1,4 +1,6 @@
 // claw-wedding-agent — WhatsApp Wedding Planner Bot
+// v1.8.2 - fix PUT minisitio: JSONB arrays (cronograma/faq/timeline/galeria/regalos)
+//          se serializan con JSON.stringify antes del bind ::jsonb (09-09-2026)
 // v1.8.1 - Minisitio autoadministrable (F1 + fix B1/A2/M3: 2026-08-27)
 // Repo canónico: softifycl/claw-wedding-agent
 // Mirror (Railway): alejandrochungp/claw-wedding-agent
@@ -3281,7 +3283,7 @@ app.put('/api/minisitio/admin/:slug', requireMinisitioToken, async (req, res) =>
         console.log(`⚠️ minisitio: PUT sin fila previa — minisitio_slug derivado '${minisitioSlug}' para ${slug} (confirmar con Alejandro)`);
         const cols = ['novio_id', 'codigo_slug', 'minisitio_slug', 'estado'];
         const vals = [novioId, slug, minisitioSlug, publicar === true ? 'publicada' : 'borrador'];
-        for (const k of MS_ALLOWED) if (k in campos) { cols.push(k); vals.push(campos[k]); }
+        for (const k of MS_ALLOWED) if (k in campos) { cols.push(k); vals.push(MS_JSONB_COLS.includes(k) ? JSON.stringify(campos[k]) : campos[k]); }
         const sql = `INSERT INTO cn_minisitio (${cols.join(', ')})
           VALUES (${cols.map((c, i) => `$${i + 1}${MS_JSONB_COLS.includes(c) ? '::jsonb' : ''}`).join(', ')})
           RETURNING *`;
@@ -3301,7 +3303,9 @@ app.put('/api/minisitio/admin/:slug', requireMinisitioToken, async (req, res) =>
         for (const k of MS_ALLOWED) {
           if (k in campos) {
             updCols.push(`${k} = $${updVals.length + 1}${MS_JSONB_COLS.includes(k) ? '::jsonb' : ''}`);
-            updVals.push(campos[k]);
+            // B1 (fix 2026-09-09): node-postgres serializa arrays JS como array literal
+            // de PG, no como JSON → '{}'::jsonb violaba el CHECK / invalid input syntax.
+            updVals.push(MS_JSONB_COLS.includes(k) ? JSON.stringify(campos[k]) : campos[k]);
           }
         }
         // M3 (fix 2026-08-27): update de contenido NO baja el estado — solo
@@ -3352,7 +3356,9 @@ app.put('/api/minisitio/admin/:slug', requireMinisitioToken, async (req, res) =>
     res.json({ ok: true, slug, updated_at: fila.updated_at, estado: fila.estado, removidos });
   } catch (err) {
     if (client) { try { await client.query('ROLLBACK'); } catch (e) { /* noop */ } client.release(); }
-    res.status(500).json({ error: err.message });
+    // E1 (fix 2026-09-09): no exponer el detalle crudo de PG al editor — log interno.
+    console.error('❌ minisitio PUT error:', err);
+    res.status(500).json({ error: 'No se pudo guardar. Reintenta o avísanos al equipo.' });
   }
 });
 
@@ -3404,7 +3410,7 @@ async function start() {
   await migrateGuestsToListHash(); // F1: lista → hash (compatibilidad con invitados viejos)
 
   app.listen(PORT, () => {
-    console.log(`💒 claw-wedding-agent v1.8.1 running on port ${PORT}`);
+    console.log(`💒 claw-wedding-agent v1.8.2 running on port ${PORT}`);
     console.log(`   Tenant:          ${TENANT.id}`);
     console.log(`   Health:          http://localhost:${PORT}/status`);
     console.log(`   Webhook WA:      http://localhost:${PORT}/webhook`);
