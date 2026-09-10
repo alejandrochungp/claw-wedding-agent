@@ -2978,13 +2978,19 @@ function validarMsTimeline(v, key, fail) {
   if (v.length > 15) fail('máximo 15 items');
   return v.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) fail('item debe ser objeto');
-    for (const k of Object.keys(item)) if (k !== 'fecha' && k !== 'texto') fail(`clave desconocida "${k}"`);
+    for (const k of Object.keys(item)) if (k !== 'fecha' && k !== 'texto' && k !== 'imagen') fail(`clave desconocida "${k}"`);
     const fecha = String(item.fecha ?? '').trim();
     const texto = String(item.texto ?? '').trim();
     if (!fecha || fecha.length > 100) fail('fecha requerida (máx 100)');
     if (!texto || texto.length > 500) fail('texto requerido (máx 500)');
     if (msTieneHtml(fecha) || msTieneHtml(texto)) fail('caracteres < > no permitidos');
-    return { fecha, texto };
+    const out = { fecha, texto };
+    if (item.imagen !== undefined && item.imagen !== null && String(item.imagen).trim() !== '') {
+      const imagen = String(item.imagen).trim();
+      if (imagen.length > 2000 || !msEsUrlHttp(imagen)) fail('imagen debe ser URL http(s)');
+      out.imagen = imagen;
+    }
+    return out;
   });
 }
 
