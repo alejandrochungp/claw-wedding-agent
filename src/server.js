@@ -201,6 +201,11 @@ async function initPostgres() {
     // Upgrade idempotente del CHECK de estado (si la tabla ya existía con el CHECK viejo)
     await pg.query('ALTER TABLE cn_minisitio DROP CONSTRAINT IF EXISTS cn_minisitio_estado_check');
     await pg.query("ALTER TABLE cn_minisitio ADD CONSTRAINT cn_minisitio_estado_check CHECK (estado IN ('borrador','publicada','pausada'))");
+    // Homepage 13-sep-2026: campos de texto del home (ALTER idempotente).
+    //   aviso       → noticia/aviso destacado editable (texto libre corto)
+    //   rsvp_plazo  → fecha límite de confirmación (texto libre, ej. "30 de octubre")
+    await pg.query('ALTER TABLE cn_minisitio ADD COLUMN IF NOT EXISTS aviso TEXT');
+    await pg.query('ALTER TABLE cn_minisitio ADD COLUMN IF NOT EXISTS rsvp_plazo TEXT');
     // Trigger: updated_at automático
     await pg.query(`
       CREATE OR REPLACE FUNCTION cn_set_updated_at() RETURNS trigger AS $$
@@ -2904,7 +2909,8 @@ app.post('/api/codigonovios/admin/regalos', requireAdminToken, async (req, res) 
 // Whitelist estricta de campos editables (spec §3; anti mass-assignment).
 // estado/codigo_slug/minisitio_slug/id/novio_id/updated_at NO están → rechazo 400.
 const MS_ALLOWED = ['hora','lugar','dress_code','estacionamiento','plus_one','contacto',
-                    'hero_img','video_url','cronograma','faq','timeline','galeria','regalos'];
+                    'hero_img','video_url','aviso','rsvp_plazo',
+                    'cronograma','faq','timeline','galeria','regalos'];
 const MS_PERMISOS = {
   editable: MS_ALLOWED,
   solo_lectura: ['nombre_novio','nombre_novia','fecha_boda','telefono_novio','email','estado'],
@@ -3077,6 +3083,8 @@ function validarMsCampo(key, v) {
     case 'contacto': return msTexto(v, 100, key, fail);
     case 'hero_img': return msUrl(v, 2000, key, fail);
     case 'video_url': return msUrl(v, 2000, key, fail);
+    case 'aviso': return msTexto(v, 300, key, fail);
+    case 'rsvp_plazo': return msTexto(v, 100, key, fail);
     case 'cronograma': return validarMsCronograma(v, key, fail);
     case 'faq': return validarMsFaq(v, key, fail);
     case 'timeline': return validarMsTimeline(v, key, fail);
@@ -3166,6 +3174,8 @@ app.get('/api/minisitio/:slug', async (req, res) => {
       contacto: m.contacto,
       hero_img: m.hero_img,
       video_url: m.video_url,
+      aviso: m.aviso,
+      rsvp_plazo: m.rsvp_plazo,
       cronograma: m.cronograma || [],
       faq: m.faq || [],
       timeline: m.timeline || [],
@@ -3234,6 +3244,8 @@ app.get('/api/minisitio/admin/:slug', requireMinisitioToken, async (req, res) =>
         contacto: m ? m.contacto : null,
         hero_img: m ? m.hero_img : null,
         video_url: m ? m.video_url : null,
+        aviso: m ? m.aviso : null,
+        rsvp_plazo: m ? m.rsvp_plazo : null,
         cronograma: m ? (m.cronograma || []) : [],
         faq: m ? (m.faq || []) : [],
         timeline: m ? (m.timeline || []) : [],
