@@ -5,24 +5,58 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
 <title>Confirmar asistencia — Alejandro &amp; Kuilen</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/favicon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/base.css">
+<link rel="stylesheet" href="/css/minisitio.css">
 <style>
+  .ms-narrow { max-width: 720px; }
+  .ms-rsvp-head { text-align: center; padding: 46px 0 4px; }
+  .ms-rsvp-head h1 { font-family: var(--font-heading); color: var(--color-primary); font-size: clamp(2rem, 5vw, 2.8rem); margin-bottom: 6px; }
+  .ms-rsvp-head p { opacity: .85; }
+  .rsvp-form { background: #fff; border-radius: 14px; padding: 34px; box-shadow: 0 4px 18px rgba(60,36,21,.1); margin: 26px 0 56px; }
+  .rsvp-form label { display: block; font-weight: 700; margin: 18px 0 6px; color: var(--color-primary); }
+  .rsvp-form input[type="text"], .rsvp-form input[type="tel"], .rsvp-form input[type="number"], .rsvp-form textarea {
+    width: 100%; padding: 12px 14px; border: 1px solid #ddd; border-radius: 8px; font-family: var(--font-body); font-size: 1rem;
+  }
+  .rsvp-form input:focus, .rsvp-form textarea:focus { outline: 2px solid var(--color-secondary); border-color: transparent; }
+  .rsvp-radio { display: flex; gap: 18px; margin-top: 6px; flex-wrap: wrap; }
+  .rsvp-radio label { font-weight: 400; color: var(--color-text); display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; }
+  .rsvp-form .btn { margin-top: 26px; width: 100%; text-align: center; cursor: pointer; font-size: 1.05rem; }
   .stepper { display: flex; align-items: center; gap: 14px; }
   .stepper-btn { width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid var(--color-secondary); background: #fff; color: var(--color-primary); font-size: 1.5rem; line-height: 1; cursor: pointer; font-weight: 700; transition: background .15s, color .15s, opacity .15s; }
   .stepper-btn:hover:not(:disabled) { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
   .stepper-btn:disabled { opacity: .35; cursor: not-allowed; }
   .stepper-value { min-width: 40px; text-align: center; font-size: 1.5rem; font-weight: 700; color: var(--color-text); }
+  .wa-float { position: fixed; bottom: 22px; right: 22px; width: 56px; height: 56px; background: #25D366; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.7rem; text-decoration: none; box-shadow: 0 4px 14px rgba(0,0,0,.25); z-index: 99; }
+  .wa-float:hover { transform: scale(1.08); }
 </style>
 </head>
 <body>
-<header class="page-header">
-  <h1>Confirmar asistencia</h1>
-  <p>Alejandro &amp; Kuilen · 17 Nov 2026 · Restaurante Meihua</p>
+<header class="ms-header">
+  <div class="container ms-header-inner">
+    <a class="ms-brand" href="/" aria-label="Nos Casamos"><img class="ms-brand-logo" src="/assets/logo-noscasamos.svg" alt="Nos Casamos" width="170" height="59"></a>
+    <button class="ms-nav-toggle" id="ms-nav-toggle" type="button" aria-label="Abrir menú" aria-expanded="false" aria-controls="ms-nav">☰</button>
+    <nav class="ms-nav" id="ms-nav">
+      <a href="/">Inicio</a>
+      <a href="/?page=info">Info</a>
+      <a href="/?page=galeria">Galería</a>
+      <a href="/?page=regalos">Regalos</a>
+      <a href="/rsvp.html" class="active">RSVP</a>
+      <a href="/editar" id="nav-panel">Mi panel</a>
+    </nav>
+  </div>
 </header>
 
-<main class="container narrow">
+<main class="container ms-narrow">
+  <div class="ms-rsvp-head">
+    <h1>Confirmar asistencia</h1>
+    <p>Alejandro &amp; Kuilen · 17 Nov 2026 · Restaurante Meihua</p>
+  </div>
+
   <div class="rsvp-form" id="rsvp-form">
     <p><strong>¿Vienes a nuestra boda?</strong> Cuéntanos para tener todo listo 🥂</p>
 
@@ -59,18 +93,54 @@
     <label for="message">Mensaje para los novios (opcional)</label>
     <textarea id="message" name="message" rows="2" placeholder="Algo lindo para ellos..."></textarea>
 
-    <button type="submit" class="btn btn-solid" id="submit-rsvp">Enviar confirmación</button>
+    <button type="submit" class="btn btn-primary" id="submit-rsvp">Enviar confirmación</button>
     <p id="rsvp-status" style="margin-top:14px; font-size:0.95rem;"></p>
   </div>
 </main>
 
-<footer class="footer">
-  <p>Alejandro &amp; Kuilen — 17 Nov 2026</p>
+<footer class="ms-footer">
+  <div class="container">
+    <span>Hecho con <a href="https://noscasamos.vip" target="_blank" rel="noopener">Nos Casamos</a> · © 2026</span>
+    <a id="panel-link" href="/editar">Mi panel</a>
+  </div>
 </footer>
 
 <a class="wa-float" href="https://wa.me/56994635497" target="_blank" aria-label="WhatsApp">💬</a>
 
 <script>
+// Menú hamburguesa en mobile (mismo comportamiento que el resto del minisitio)
+(function () {
+  var tgl = document.getElementById('ms-nav-toggle');
+  var nav = document.getElementById('ms-nav');
+  if (!tgl || !nav) { return; }
+  tgl.addEventListener('click', function () {
+    var abierto = nav.classList.toggle('open');
+    tgl.setAttribute('aria-expanded', String(abierto));
+    tgl.textContent = abierto ? '✕' : '☰';
+  });
+  nav.addEventListener('click', function (e) {
+    if (e.target && e.target.tagName === 'A') {
+      nav.classList.remove('open');
+      tgl.setAttribute('aria-expanded', 'false');
+      tgl.textContent = '☰';
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      nav.classList.remove('open');
+      tgl.setAttribute('aria-expanded', 'false');
+      tgl.textContent = '☰';
+    }
+  });
+  window.addEventListener('resize', function () {
+    if (window.innerWidth > 820 && nav.classList.contains('open')) {
+      nav.classList.remove('open');
+      tgl.setAttribute('aria-expanded', 'false');
+      tgl.textContent = '☰';
+    }
+  });
+})();
+
 var CUPO_MAX = null;
 var GUESTS = 0;
 
