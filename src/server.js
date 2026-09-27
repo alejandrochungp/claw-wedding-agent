@@ -847,10 +847,12 @@ async function notifyNoviosRsvp(d, status) {
 // ── Novio Commands (Fase 2 + G1/G2 + Parejas) ────────────────
 async function handleNovioCommand(from, text) {
   const lower = text.trim().toLowerCase();
+  // Normalizacion SIN tildes: tolera variantes de escritura en los comandos
+  const norm = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   console.log(`🎛️ Comando novio [${from}]: ${text.slice(0, 100)}`);
 
   // G1: confirmación de eliminación pendiente ("sí, eliminar" / "confirmar")
-  if (/s[ií],\s*eliminar|confirmar eliminaci[oó]n|s[ií]\s*eliminar/i.test(lower)) {
+  if (/s[i]?,?\s*eliminar|confirmar eliminacion|si eliminar/i.test(norm)) {
     try {
       const pending = await redis.get(`wedding:pend_delete:${from}`);
       if (pending) {
@@ -869,7 +871,7 @@ async function handleNovioCommand(from, text) {
   }
 
   // G1: eliminar invitado (con confirmación)
-  if (/eliminar invitado|quitar a|borrar invitado/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+  if (/eliminar invitado|quitar a|borrar invitado|sacar a|elimina a|borrar a/i.test(norm) && PHONE_RE_SINGLE.test(text)) {
     const phoneMatch = text.match(PHONE_RE_SINGLE);
     const phone = normalizePhone(phoneMatch[0]);
     const guest = await getGuest(phone);
@@ -883,10 +885,10 @@ async function handleNovioCommand(from, text) {
   }
 
   // G2: ver invitados (listado PAGINADO: 20 por pagina; "ver invitados 2" para la siguiente)
-  if (/ver invitados|lista invitados|listado de invitados/i.test(lower)) {
+  if (/ver invitados|lista invitados|listado de invitados|mostrar invitados|muestrame los invitados|dame la lista|lista de invitados|ver la lista|quienes estan invitados|revisar invitados/i.test(norm)) {
     try {
       const PAGE_SIZE = 20;
-      const pm = lower.match(/(?:ver invitados|lista invitados|listado de invitados)\s*(\d+)/);
+      const pm = norm.match(/(?:ver|lista|listado|mostrar)[^]{0,25}invitados\s*(\d+)/);
       const pageReq = Math.max(1, parseInt((pm && pm[1]) || '1', 10) || 1);
       const all = await redis.hgetall('wedding:guests');
       const guests = Object.entries(all).map(([phone, raw]) => ({ phone, ...JSON.parse(raw) }));
@@ -894,13 +896,38 @@ async function handleNovioCommand(from, text) {
       const totalPages = Math.max(1, Math.ceil(guests.length / PAGE_SIZE));
       const page = Math.min(pageReq, totalPages);
       const pageGuests = guests.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+      // Estado de CONFIRMACION (RSVP) por invitado: la lista y los RSVP viven separados,
+      // se cruzan por telefono (antes todos salian como "invitacion enviada").
+      const rsvpEntries = await redis.lrange(RSVP_KEY, 0, -1);
+      const rsvpByPhone = {};
+      for (const rawR of rsvpEntries) {
+        try {
+          const r = JSON.parse(rawR);
+          if (r && r.telefono) rsvpByPhone[normalizePhone(r.telefono)] = String(r.rsvp || '');
+        } catch (e) { /* entrada corrupta: se ignora */ }
+      }
+      const rsvpMark = (ph) => {
+        const st = (rsvpByPhone[ph] || '').toLowerCase();
+        if (st.includes('confirmado')) return '✅';
+        if (st.includes('no asistir')) return '❌';
+        if (st.includes('tal vez') || st.includes('talvez')) return '🤔';
+        return '⏳';
+      };
+      const rsvpCount = { ok: 0, no: 0, tal: 0, pend: 0 };
+      for (const g of guests) {
+        const mk = rsvpMark(g.phone);
+        if (mk === '✅') rsvpCount.ok++;
+        else if (mk === '❌') rsvpCount.no++;
+        else if (mk === '🤔') rsvpCount.tal++;
+        else rsvpCount.pend++;
+      }
       const stages = {};
       for (const g of guests) stages[g.stage || 'sin_stage'] = (stages[g.stage || 'sin_stage'] || 0) + 1;
       let msg = `📋 *Invitados (${guests.length})* - pagina ${page}/${totalPages}\n`;
-      msg += `🆕 nuevo: ${stages.nuevo || 0} · 📨 invitación: ${stages.invitacion_enviada || 0} · ✅ confirmados: ${stages.confirmado || 0} · ❌ no: ${stages.no_asistira || 0} · 🤔 talvez: ${stages.tal_vez || 0}\n\n`;
+      msg += `✅ confirmados: ${rsvpCount.ok} · 🤔 tal vez: ${rsvpCount.tal} · ❌ no: ${rsvpCount.no} · ⏳ sin responder: ${rsvpCount.pend}\n\n`;
       const emoji = { nuevo: '🆕', invitacion_enviada: '📨', confirmado: '✅', no_asistira: '❌', tal_vez: '🤔' };
       for (const g of pageGuests) {
-        msg += `${emoji[g.stage] || '❔'} ${g.name} — ${g.phone}${typeof g.acompanantes === 'number' ? ` · cupo ${g.acompanantes}` : ''}${g.coupleId ? ' 👫' : ''}\n`;
+        msg += `${rsvpMark(g.phone)} ${g.name} — ${g.phone}${typeof g.acompanantes === 'number' ? ` · cupo ${g.acompanantes}` : ''}${g.coupleId ? ' 👫' : ''}\n`;
       }
       if (page < totalPages) msg += `
 
@@ -914,7 +941,7 @@ async function handleNovioCommand(from, text) {
   }
 
   // Parejas: vincular 2 invitados existentes
-  if (/vincular pareja|vincular a|unir pareja/i.test(lower) && (text.match(PHONE_RE) || []).length >= 2) {
+  if (/vincular pareja|vincular a|unir pareja|vincular invitados|unir a/i.test(norm) && (text.match(PHONE_RE) || []).length >= 2) {
     const phones = (text.match(PHONE_RE) || []).map(p => normalizePhone(p));
     const res = await linkCouple(phones[0], phones[1]);
     if (res.ok) {
@@ -927,21 +954,21 @@ async function handleNovioCommand(from, text) {
     return;
   }
 
-  if (/agregar|a[nñ]ade?|agrega|nuevo invitado|invitado/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+  if (/agregar|anade|anadir|agrega|nuevo invitado|invitado|sumar a|suma a/i.test(norm) && PHONE_RE_SINGLE.test(text)) {
     // Fase 2: parser extrae nombre + WhatsApp (+ correo opcional) — soporta parejas
     await addGuestViaChat(from, text);
     return;
   }
 
   // F1: enviar invitación a un invitado específico
-  if (/enviar invitaci[oó]n a|invitar a/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+  if (/enviar invitacion a|invitar a|mandar invitacion a|enviar el save|enviar save the date a/i.test(norm) && PHONE_RE_SINGLE.test(text)) {
     const phoneMatch = text.match(PHONE_RE_SINGLE);
     await sendInviteToGuest(from, normalizePhone(phoneMatch[0]));
     return;
   }
 
   // G3: reenviar invitación (sin dedupe)
-  if (/reenviar invitaci[oó]n a|reenviar a/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+  if (/reenviar invitacion a|reenviar a|volver a enviar/i.test(norm) && PHONE_RE_SINGLE.test(text)) {
     const phoneMatch = text.match(PHONE_RE_SINGLE);
     await sendInviteToGuest(from, normalizePhone(phoneMatch[0]), { force: true });
     return;
@@ -949,7 +976,7 @@ async function handleNovioCommand(from, text) {
 
   // G4: editar invitado (correo / nombre / teléfono)
   // editar correo de {phone} a {email}
-  if (/editar correo de/i.test(lower) && PHONE_RE_SINGLE.test(text) && /[\w.+-]+@[\w-]+\.[\w.]+/.test(text)) {
+  if (/editar correo de|cambiar correo de|corregir correo de/i.test(norm) && PHONE_RE_SINGLE.test(text) && /[\w.+-]+@[\w-]+\.[\w.]+/.test(text)) {
     const phoneMatch = text.match(PHONE_RE_SINGLE);
     const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
     const phone = normalizePhone(phoneMatch[0]);
@@ -960,7 +987,7 @@ async function handleNovioCommand(from, text) {
   }
 
   // editar nombre de {phone} a {nombre}
-  if (/editar nombre de/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+  if (/editar nombre de|cambiar nombre de|corregir nombre de/i.test(norm) && PHONE_RE_SINGLE.test(text)) {
     const phoneMatch = text.match(PHONE_RE_SINGLE);
     const phone = normalizePhone(phoneMatch[0]);
     // Extraer nombre después de "a " (regex exacta, evita split por 'a ' que rompe con 'María')
@@ -977,7 +1004,7 @@ async function handleNovioCommand(from, text) {
   }
 
   // editar acompañantes (cupo) de {phone} a {n}
-  if (/editar (acompa[nñ]antes|cupo) de/i.test(lower) && PHONE_RE_SINGLE.test(text)) {
+  if (/(editar|cambiar|actualizar|fijar|ajustar|modificar|poner|pon|setear|corregir)[^]{0,25}(acompanantes|cupo)/i.test(norm) && PHONE_RE_SINGLE.test(text)) {
     const phoneMatch = text.match(PHONE_RE_SINGLE);
     const phone = normalizePhone(phoneMatch[0]);
     const cupoMatch = text.match(/(?:a\s+)?(\d+)\s*$/);
@@ -993,7 +1020,7 @@ async function handleNovioCommand(from, text) {
   }
 
   // editar teléfono de {viejo} a {nuevo} — reemplaza con aviso
-  if (/editar tel[eé]fono de/i.test(lower) && (text.match(PHONE_RE) || []).length >= 2) {
+  if (/editar telefono de|cambiar telefono de|corregir telefono de|editar fono de/i.test(norm) && (text.match(PHONE_RE) || []).length >= 2) {
     const phones = (text.match(PHONE_RE) || []).map(p => normalizePhone(p));
     const res = await editGuest(phones[0], 'phone', phones[1]);
     if (res.ok) {
@@ -1007,12 +1034,12 @@ async function handleNovioCommand(from, text) {
   }
 
   // F1: batch a todos los pendientes
-  if (/enviar invitaci[oó]n a todos|invitar a todos|enviar a todos los pendientes/i.test(lower)) {
+  if (/enviar invitacion a todos|invitar a todos|enviar a todos los pendientes|enviar a todos/i.test(norm)) {
     await sendInviteToAll(from);
     return;
   }
 
-  if (/ver (los |las )?(confirmaciones|invitados)|cu[aá]ntos confirm|estado/i.test(lower)) {
+  if (/(ver|mostrar|dame|listar|lista|listado|pasame)[^]{0,20}(confirmacion|confirmaciones|confirmados|confirmaron)|cuantos (confirm|asist|van)|estados? de confirmacion/i.test(norm)) {
     try {
       const s = await getConfirmedStats(); // con absorción de parejas 👫
       await sendWhatsAppMessage(from, `📊 *Estado de confirmaciones:*\n✅ Confirmados: ${s.confirmed}\n❌ No asistirán: ${s.declined}\n🤔 Tal vez: ${s.maybe}\n👥 Asistentes estimados: ${s.totalAsistentes}\n\n(Total registrados: ${s.totalRegistrados})\n\n📋 ¿Quieres ver *los nombres* de los confirmados?\n➡️ Responde: *"ver nombres"*`);
@@ -1023,7 +1050,7 @@ async function handleNovioCommand(from, text) {
   }
 
   // Segunda opción: listar los NOMBRES de los confirmados (y no-asistentes)
-  if (/ver nombres|nombres de los confirmados|qui[eé]nes (son|van|confirman)|listado/i.test(lower)) {
+  if (/ver nombres|nombres de los confirmados|quienes (son|van|confirman)|listado de confirmados|quienes confirman/i.test(norm)) {
     try {
       const entries = await redis.lrange(RSVP_KEY, 0, -1);
       const rsvps = entries.map(e => JSON.parse(e));
@@ -1052,7 +1079,8 @@ async function handleNovioCommand(from, text) {
   }
 
   // Comando no reconocido — menú rápido
-  await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar a {nombre} +56 9..."* — añadir invitado (o pareja: *"agregar a A +56 9... y B +56 9..."*; con cupo: *"... cupo 2"*)\n📨 *"enviar invitación a {phone}"* — enviar save-the-date a uno\n📨 *"reenviar invitación a {phone}"* — reenviar sin dedupe\n📨 *"enviar invitación a todos"* — batch a pendientes\n📋 *"ver invitados"* — listado con stages y cupo\n📊 *"ver confirmaciones"* — estado RSVP\n👥 *"editar acompañantes de {phone} a {n}"* — fijar cupo (0-5)\n👫 *"vincular pareja {p1} {p2}"* — vincular 2 invitados (fix +1)\n✏️ *"editar correo/nombre/teléfono de {phone} a ..."* — editar invitado\n🗑️ *"eliminar invitado {phone}"* — eliminar (con confirmación)\n\n¿Qué necesitas?`);
+  await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar a {nombre} +56 9..."* — añadir invitado (o pareja: *"agregar a A +56 9... y B +56 9..."*; con cupo: *"... cupo 2"*)\n📨 *"enviar invitación a {phone}"* — enviar save-the-date a uno\n📨 *"reenviar invitación a {phone}"* — reenviar sin dedupe\n📨 *"enviar invitación a todos"* — batch a pendientes\n📋 *"ver invitados [n]"* - listado paginado (estado de confirmacion + cupo)\n📊 *"ver confirmaciones"* — estado RSVP\n👥 *"editar acompañantes de {phone} a {n}"* — fijar cupo (0-5)\n👫 *"vincular pareja {p1} {p2}"* — vincular 2 invitados (fix +1)\n✏️ *"editar correo/nombre/teléfono de {phone} a ..."* — editar invitado\n🗑️ *"eliminar invitado {phone}"* — eliminar (con confirmación)\n\n¿Qué necesitas?`);
+  await sendWhatsAppMessage(from, `💡 Ademas entiendo variantes en lenguaje natural. Ejemplos:\n• "muestrame los invitados"\n• "cuantos confirmaron"\n• "cambiale el cupo a +56 9 1234 5678 a 2"\n\nSi no entiendo algo, te muestro este menu.`);
 }
 
 // ── Cupo parser ──────────────────────────────────────────────
