@@ -882,20 +882,29 @@ async function handleNovioCommand(from, text) {
     return;
   }
 
-  // G2: ver invitados (listado completo con stages)
+  // G2: ver invitados (listado PAGINADO: 20 por pagina; "ver invitados 2" para la siguiente)
   if (/ver invitados|lista invitados|listado de invitados/i.test(lower)) {
     try {
+      const PAGE_SIZE = 20;
+      const pm = lower.match(/(?:ver invitados|lista invitados|listado de invitados)\s*(\d+)/);
+      const pageReq = Math.max(1, parseInt((pm && pm[1]) || '1', 10) || 1);
       const all = await redis.hgetall('wedding:guests');
       const guests = Object.entries(all).map(([phone, raw]) => ({ phone, ...JSON.parse(raw) }));
+      guests.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      const totalPages = Math.max(1, Math.ceil(guests.length / PAGE_SIZE));
+      const page = Math.min(pageReq, totalPages);
+      const pageGuests = guests.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
       const stages = {};
       for (const g of guests) stages[g.stage || 'sin_stage'] = (stages[g.stage || 'sin_stage'] || 0) + 1;
-      let msg = `📋 *Invitados (${guests.length}):*\n`;
+      let msg = `📋 *Invitados (${guests.length})* - pagina ${page}/${totalPages}\n`;
       msg += `🆕 nuevo: ${stages.nuevo || 0} · 📨 invitación: ${stages.invitacion_enviada || 0} · ✅ confirmados: ${stages.confirmado || 0} · ❌ no: ${stages.no_asistira || 0} · 🤔 talvez: ${stages.tal_vez || 0}\n\n`;
       const emoji = { nuevo: '🆕', invitacion_enviada: '📨', confirmado: '✅', no_asistira: '❌', tal_vez: '🤔' };
-      for (const g of guests.slice(0, 20)) {
+      for (const g of pageGuests) {
         msg += `${emoji[g.stage] || '❔'} ${g.name} — ${g.phone}${typeof g.acompanantes === 'number' ? ` · cupo ${g.acompanantes}` : ''}${g.coupleId ? ' 👫' : ''}\n`;
       }
-      if (guests.length > 20) msg += `\n... y ${guests.length - 20} más`;
+      if (page < totalPages) msg += `
+
+*"ver invitados ${page + 1}"* para ver los ${guests.length - page * PAGE_SIZE} restantes.`;
       await sendWhatsAppMessage(from, msg);
     } catch (e) {
       console.error('❌ ver invitados error:', e.message);
