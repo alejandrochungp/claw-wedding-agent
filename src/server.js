@@ -1078,6 +1078,24 @@ async function handleNovioCommand(from, text) {
     return;
   }
 
+  // \u2500\u2500 Router LLM (DeepSeek): entiende frases armadas, no solo comandos exactos \u2500\u2500
+  if (DEEPSEEK_API_KEY && text.trim().length >= 4) {
+    try {
+      const it = await classifyCoupleIntent(text);
+      const intent = it ? _normTxt(it.intent) : '';
+      if (intent === 'desconocido' && String((it || {}).respuesta || '').trim()) {
+        await sendWhatsAppMessage(from, String(it.respuesta).trim());
+        return;
+      }
+      if (intent && intent !== 'desconocido') {
+        const hecho = await ejecutarIntencionRouter(it, from);
+        if (hecho) return;
+      }
+    } catch (e) {
+      console.error('\u26a0\ufe0f router LLM:', e.message);
+    }
+  }
+
   // Comando no reconocido — menú rápido
   await sendWhatsAppMessage(from, `🎛️ *Panel de novios* — comandos disponibles:\n\n➕ *"agregar a {nombre} +56 9..."* — añadir invitado (o pareja: *"agregar a A +56 9... y B +56 9..."*; con cupo: *"... cupo 2"*)\n📨 *"enviar invitación a {phone}"* — enviar save-the-date a uno\n📨 *"reenviar invitación a {phone}"* — reenviar sin dedupe\n📨 *"enviar invitación a todos"* — batch a pendientes\n📋 *"ver invitados [n]"* - listado paginado (estado de confirmacion + cupo)\n📊 *"ver confirmaciones"* — estado RSVP\n👥 *"editar acompañantes de {phone} a {n}"* — fijar cupo (0-5)\n👫 *"vincular pareja {p1} {p2}"* — vincular 2 invitados (fix +1)\n✏️ *"editar correo/nombre/teléfono de {phone} a ..."* — editar invitado\n🗑️ *"eliminar invitado {phone}"* — eliminar (con confirmación)\n\n¿Qué necesitas?`);
   await sendWhatsAppMessage(from, `💡 Ademas entiendo variantes en lenguaje natural. Ejemplos:\n• "muestrame los invitados"\n• "cuantos confirmaron"\n• "cambiale el cupo a +56 9 1234 5678 a 2"\n\nSi no entiendo algo, te muestro este menu.`);
@@ -1803,6 +1821,128 @@ async function sendInviteTemplate(to, mediaId) {
 }
 
 // ── Send WhatsApp Message ─────────────────────────────────────
+// ─── Router de intenciones con DeepSeek: el bot entiende frases armadas (no solo comandos) ───
+const COUPLE_INTENTS = ['ver_invitados', 'ver_confirmaciones', 'editar_cupo', 'editar_nombre', 'editar_telefono', 'editar_correo', 'desconocido'];
+
+function _normTxt(t) {
+  return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
+
+async function classifyCoupleIntent(text) {
+  const prompt = [
+    'Eres el router de comandos del bot de WhatsApp de una boda. Quien escribe es uno de los NOVIOS.',
+    'Devuelve SOLO un JSON valido (sin markdown) con esta forma exacta:',
+    '{"intent":"<intent>","telefono":"","nombre":"","n":null,"valor":"","page":1,"respuesta":""}',
+    'Intents: ' + COUPLE_INTENTS.join(', ') + '.',
+    'Reglas: "telefono" solo si el mensaje trae un numero; "nombre" si menciona a un invitado por nombre;',
+    '"n" el numero de acompanantes/cupo cuando corresponda (0-5); "valor" el dato nuevo (nombre/correo/telefono);',
+    '"page" la pagina pedida de la lista (por defecto 1); "respuesta" solo si intent=desconocido (una frase corta, util y cercana en espanol).',
+    'Datos de la boda: martes 17 de noviembre de 2026, Restaurante Meihua, Cerrillos (Santiago); ~280 invitados planificados;',
+    'vinos cotizados en Tost; minisitio de la pareja: alejandro-kuilen.noscasamos.vip.',
+    'Ejemplos:',
+    '"cuantos confirmaron?" -> {"intent":"ver_confirmaciones"}',
+    '"muestrame los invitados" -> {"intent":"ver_invitados","page":1}',
+    '"quiero ver la segunda pagina" -> {"intent":"ver_invitados","page":2}',
+    '"quiero que juan pueda traer a su hermana" -> {"intent":"editar_cupo","nombre":"juan","n":1}',
+    '"subele el cupo a +56 9 1234 5678 a 3" -> {"intent":"editar_cupo","telefono":"+56912345678","n":3}',
+    '"cambia el nombre de maria perez a maria perez soto" -> {"intent":"editar_nombre","nombre":"maria perez","valor":"maria perez soto"}',
+    '"actualiza el correo de +56 9 1234 5678 a nuevo@mail.cl" -> {"intent":"editar_correo","telefono":"+56912345678","valor":"nuevo@mail.cl"}',
+    '"hola" -> {"intent":"desconocido","respuesta":"Hola! Escribeme *menu* y te muestro todo lo que puedo hacer."}',
+    'Mensaje del novio: "' + text + '"',
+  ].join('\n');
+  const res = await axios.post('https://api.deepseek.com/v1/chat/completions', {
+    model: DEEPSEEK_MODEL,
+    messages: [
+      { role: 'system', content: 'Respondes unicamente JSON valido, sin texto extra.' },
+      { role: 'user', content: prompt },
+    ],
+    temperature: 0,
+    max_tokens: 250,
+  }, { headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DEEPSEEK_API_KEY }, timeout: 15000 });
+  const raw = String((((((res.data || {}).choices || [])[0] || {}).message) || {}).content || '').trim();
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  return JSON.parse(m[0]);
+}
+
+async function resolverTelefonoRouter(telefono, nombre) {
+  if (telefono) return normalizePhone(telefono);
+  if (!nombre) return null;
+  const all = await redis.hgetall('wedding:guests');
+  const obj = _normTxt(nombre);
+  if (!obj) return null;
+  const cands = Object.entries(all).map(([ph, raw]) => ({ phone: ph, ...JSON.parse(raw) }))
+    .filter(g => {
+      const n = _normTxt(String(g.name || '').replace(/con cupo \d+/i, ''));
+      return n && (n.includes(obj) || obj.includes(n));
+    });
+  return cands.length === 1 ? cands[0].phone : null;
+}
+
+async function ejecutarIntencionRouter(it, from) {
+  const intent = _normTxt(it.intent);
+  if (intent === 'ver_confirmaciones') {
+    const s = await getConfirmedStats();
+    await sendWhatsAppMessage(from, `\U0001f4ca *Confirmaciones*\n\u2705 confirmados: ${s.confirmed} \u00b7 \U0001f914 tal vez: ${s.maybe} \u00b7 \u274c no: ${s.declined}\n\U0001f465 Personas con acompanantes: ${s.totalAsistentes}`);
+    return true;
+  }
+  if (intent === 'ver_invitados') {
+    const all = await redis.hgetall('wedding:guests');
+    const guests = Object.entries(all).map(([phone, raw]) => ({ phone, ...JSON.parse(raw) }));
+    guests.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    const ent = await redis.lrange(RSVP_KEY, 0, -1);
+    const byPhone = {};
+    for (const r of ent) {
+      try { const e = JSON.parse(r); if (e.telefono) byPhone[normalizePhone(e.telefono)] = String(e.rsvp || ''); } catch (err) { /* noop */ }
+    }
+    const mark = (ph) => {
+      const st = (byPhone[ph] || '').toLowerCase();
+      if (st.includes('confirmado')) return '\u2705';
+      if (st.includes('no asistir')) return '\u274c';
+      if (st.includes('tal vez') || st.includes('talvez')) return '\U0001f914';
+      return '\u23f3';
+    };
+    const SIZE = 30;
+    const totalPages = Math.max(1, Math.ceil(guests.length / SIZE));
+    const p = Math.min(Math.max(1, parseInt(it.page, 10) || 1), totalPages);
+    let msg = `\U0001f4cb *Invitados (${guests.length})* \u2014 pagina ${p}/${totalPages}\n\n`;
+    for (const g of guests.slice((p - 1) * SIZE, p * SIZE)) {
+      msg += `${mark(g.phone)} ${g.name} \u2014 ${g.phone}${typeof g.acompanantes === 'number' ? ` \u00b7 cupo ${g.acompanantes}` : ''}\n`;
+    }
+    if (p < totalPages) msg += `\nEscribe *"ver invitados ${p + 1}"* para la siguiente pagina.`;
+    await sendWhatsAppMessage(from, msg);
+    return true;
+  }
+  if (intent === 'editar_cupo') {
+    const n = parseInt(it.n, 10);
+    if (isNaN(n) || n < 0 || n > 5) {
+      await sendWhatsAppMessage(from, '\u26a0\ufe0f El cupo va de 0 a 5 acompanantes. Cuantos le pongo?');
+      return true;
+    }
+    const ph = await resolverTelefonoRouter(it.telefono, it.nombre);
+    if (!ph) {
+      await sendWhatsAppMessage(from, `\u26a0\ufe0f No pude identificar al invitado. Mandame el telefono: *"editar acompanantes de +56 9 ... a ${n}"*`);
+      return true;
+    }
+    const res = await editGuest(ph, 'acompanantes', n);
+    if (res.ok) await sendWhatsAppMessage(from, `\u2705 Cupo de *${res.guest.name}* actualizado: ${res.changed.from == null ? 'sin cupo' : res.changed.from} \u2192 *${res.changed.to}* acompanantes.`);
+    else await sendWhatsAppMessage(from, '\u26a0\ufe0f No pude editar: ese invitado no esta en la lista.');
+    return true;
+  }
+  if (intent === 'editar_nombre' || intent === 'editar_correo' || intent === 'editar_telefono') {
+    const campo = intent === 'editar_nombre' ? 'name' : (intent === 'editar_correo' ? 'email' : 'phone');
+    const valor = String(it.valor || '').trim();
+    if (!valor) { await sendWhatsAppMessage(from, '\u26a0\ufe0f Falta el valor nuevo.'); return true; }
+    const ph = await resolverTelefonoRouter(it.telefono, it.nombre);
+    if (!ph) { await sendWhatsAppMessage(from, '\u26a0\ufe0f No pude identificar al invitado. Mandame su telefono.'); return true; }
+    const res = await editGuest(ph, campo, campo === 'phone' ? normalizePhone(valor) : valor);
+    if (res.ok) await sendWhatsAppMessage(from, `\u2705 Actualizado *${res.guest.name}*: ${res.changed.from} \u2192 *${res.changed.to}*`);
+    else await sendWhatsAppMessage(from, '\u26a0\ufe0f No pude editar: ' + (res.reason === 'phone_en_uso' ? 'ese telefono ya esta en la lista' : 'revisa los datos'));
+    return true;
+  }
+  return false;
+}
+
 async function sendWhatsAppMessage(to, text) {
   if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
     console.warn('⚠️ WhatsApp not configured');
