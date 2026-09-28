@@ -2360,6 +2360,429 @@ app.post('/admin/clean-names', async (req, res) => {
   }
 });
 
+// ── PANEL ADMIN WEB — invitados (Fase P1, 27-sep-2026) ──────
+// Panel de navegador para que los novios hagan TODO lo que hoy hacen por
+// comandos de WhatsApp: ver/buscar/filtrar invitados, agregar, editar,
+// eliminar, enviar la invitación (uno o a todos los pendientes) y ver el
+// resumen RSVP. Autenticación propia por contraseña (env ADMIN_PANEL_PASSWORD)
+// que emite un token HMAC de 24h. Los /admin/* existentes NO se tocan
+// (los consumen automatizaciones sin auth).
+const ADMIN_PANEL_PASSWORD = process.env.ADMIN_PANEL_PASSWORD || '';
+
+// Secret de firma derivado de la contraseña: si cambia, los tokens viejos mueren.
+function panelSecret() {
+  return crypto.createHash('sha256').update('wedding-panel:' + ADMIN_PANEL_PASSWORD).digest('hex');
+}
+
+const panelLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 10,
+  standardHeaders: 'draft-7', legacyHeaders: false,
+  keyGenerator: (req) => 'panel:' + req.ip,
+});
+
+function requirePanelToken(req, res, next) {
+  if (!ADMIN_PANEL_PASSWORD) return res.status(503).json({ error: 'Panel no configurado (falta ADMIN_PANEL_PASSWORD)' });
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token || !verifyAdminToken(token, 'PANEL', panelSecret())) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  next();
+}
+
+// Cruce wedding:guests ↔ wedding:rsvps por teléfono (el último RSVP gana).
+async function getRsvpMap() {
+  const entries = await redis.lrange(RSVP_KEY, 0, -1);
+  const map = {};
+  for (const raw of entries) {
+    try {
+      const r = JSON.parse(raw);
+      if (r && r.telefono) map[normalizePhone(r.telefono)] = r;
+    } catch (e) { /* entrada corrupta */ }
+  }
+  return map;
+}
+
+function rsvpStatusOf(rsvpText) {
+  const st = String(rsvpText || '').toLowerCase();
+  if (st.includes('confirmado')) return 'confirmado';
+  if (st.includes('no asistir')) return 'no_asiste';
+  if (st.includes('tal vez') || st.includes('talvez')) return 'tal_vez';
+  return 'sin_responder';
+}
+
+app.post('/panel/api/login', panelLoginLimiter, (req, res) => {
+  if (!ADMIN_PANEL_PASSWORD) return res.status(503).json({ error: 'Panel no configurado' });
+  const pass = String((req.body && req.body.password) || '');
+  const a = crypto.createHash('sha256').update(pass).digest();
+  const b = crypto.createHash('sha256').update(ADMIN_PANEL_PASSWORD).digest();
+  if (!crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: 'Contraseña incorrecta' });
+  res.json({ ok: true, token: makeAdminToken('PANEL', panelSecret()) });
+});
+
+app.get('/panel/api/stats', requirePanelToken, async (_req, res) => {
+  try { res.json(await getConfirmedStats()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Lista completa (invitados + estado RSVP + stats) para el panel
+app.get('/panel/api/data', requirePanelToken, async (_req, res) => {
+  try {
+    const all = await redis.hgetall('wedding:guests');
+    const rsvpMap = await getRsvpMap();
+    const guests = Object.entries(all || {}).map(([phone, raw]) => {
+      let g = {};
+      try { g = JSON.parse(raw); } catch (e) { /* JSON corrupto */ }
+      const r = rsvpMap[phone] || null;
+      return {
+        phone,
+        name: g.name || '',
+        email: g.email || '',
+        stage: g.stage || 'nuevo',
+        acompanantes: typeof g.acompanantes === 'number' ? g.acompanantes : null,
+        coupleId: g.coupleId || null,
+        partnerPhone: g.partnerPhone || null,
+        createdAt: g.createdAt || null,
+        templatesSent: (g.templatesSent || []).length,
+        rsvp: r ? String(r.rsvp || '') : null,
+        rsvpNotas: r ? (r.notas || null) : null,
+        rsvpStatus: rsvpStatusOf(r ? r.rsvp : ''),
+      };
+    });
+    guests.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    res.json({ total: guests.length, guests, stats: await getConfirmedStats() });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Agregar invitado
+app.post('/panel/api/guest', requirePanelToken, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const phone = normalizePhone(String(b.phone || ''));
+    const name = String(b.name || '').trim();
+    if (!phone || phone.length < 8) return res.status(400).json({ error: 'Teléfono inválido' });
+    if (!name) return res.status(400).json({ error: 'Falta el nombre' });
+    if (await getGuest(phone)) return res.status(409).json({ error: 'Ese teléfono ya está en la lista' });
+    const guest = {
+      name, phone,
+      email: b.email ? String(b.email).trim() : null,
+      addedBy: 'panel_web',
+      createdAt: new Date().toISOString(),
+      stage: 'nuevo', stageUpdatedAt: new Date().toISOString(), templatesSent: [],
+    };
+    if (b.acompanantes !== undefined && b.acompanantes !== null && b.acompanantes !== '') {
+      guest.acompanantes = Math.max(0, Math.min(5, parseInt(b.acompanantes, 10) || 0));
+    }
+    await redis.hset('wedding:guests', phone, JSON.stringify(guest));
+    await registerActor(phone, 'invitado', { name, email: guest.email });
+    await notifySlack(`➕ *Invitado agregado desde PANEL WEB*:\n👤 ${name}\n📱 ${phone}${guest.email ? `\n📧 ${guest.email}` : ''}${guest.acompanantes != null ? `\n👥 Cupo: ${guest.acompanantes}` : ''}`);
+    res.json({ ok: true, guest });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Editar invitado (reutiliza editGuest: name | email | phone | acompanantes)
+app.post('/panel/api/guest/edit', requirePanelToken, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const phone = normalizePhone(String(b.phone || ''));
+    const field = String(b.field || '');
+    if (!['name', 'email', 'phone', 'acompanantes'].includes(field)) return res.status(400).json({ error: 'Campo inválido' });
+    const value = field === 'acompanantes'
+      ? Math.max(0, Math.min(5, parseInt(b.value, 10) || 0))
+      : String(b.value == null ? '' : b.value).trim();
+    if (field !== 'acompanantes' && !value) return res.status(400).json({ error: 'Valor requerido' });
+    const r = await editGuest(phone, field, value);
+    if (!r.ok) return res.status(400).json({ error: r.reason });
+    await notifySlack(`✏️ *Editado desde PANEL WEB*: ${r.guest.name} (${field}) → ${JSON.stringify(r.changed)}`);
+    res.json({ ok: true, guest: r.guest, changed: r.changed });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Eliminar invitado (reutiliza deleteGuest: borra también su RSVP)
+app.delete('/panel/api/guest/:phone', requirePanelToken, async (req, res) => {
+  try {
+    const phone = normalizePhone(req.params.phone);
+    const guest = await getGuest(phone);
+    if (!guest) return res.status(404).json({ error: 'Ese invitado no existe' });
+    await deleteGuest(phone);
+    await notifySlack(`🗑️ *Invitado eliminado desde PANEL WEB*: ${guest.name} (${phone})`);
+    res.json({ ok: true, deleted: { phone, name: guest.name } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Enviar invitación: { phone, force? } a uno, o { all: true } a los pendientes
+app.post('/panel/api/invite', requirePanelToken, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const from = TENANT.noviosPhones[0]; // mismo aviso WhatsApp/Slack que los comandos
+    if (b.all) {
+      await sendInviteToAll(from);
+      return res.json({ ok: true, mode: 'all' });
+    }
+    const phone = normalizePhone(String(b.phone || ''));
+    if (!phone) return res.status(400).json({ error: 'Teléfono requerido' });
+    if (!(await getGuest(phone))) return res.status(404).json({ error: 'Ese invitado no existe' });
+    await sendInviteToGuest(from, phone, { force: !!b.force });
+    res.json({ ok: true, mode: 'one', phone });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+const PANEL_HTML = `<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<meta name="theme-color" content="#8B3232" />
+<title>Panel Invitados — Boda</title>
+<style>
+:root{--vino:#8B3232;--oro:#C9A84C;--crema:#F5F0E8;--tinta:#2b2320;--linea:#e2d8c7;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--crema);color:var(--tinta);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.45}
+header.bar{background:var(--vino);color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;z-index:9}
+header.bar h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.3px}
+header.bar h1 em{color:var(--oro);font-style:normal}
+.wrap{max-width:920px;margin:0 auto;padding:14px}
+.card{background:#fff;border:1px solid var(--linea);border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+label{display:block;font-size:13px;color:#6b5f52;margin:12px 0 4px;font-weight:600}
+input,select{width:100%;padding:11px;border:1px solid #d9cfbe;border-radius:10px;font-size:16px;background:#fff;color:var(--tinta)}
+button{font-family:inherit}
+.btn{background:var(--vino);color:#fff;border:0;border-radius:10px;padding:11px 15px;font-size:15px;font-weight:600;cursor:pointer}
+.btn.alt{background:var(--oro);color:#3b2f12}
+.btn.ghost{background:#fff;color:var(--vino);border:1px solid var(--vino)}
+.btn.mini{padding:7px 10px;font-size:13px;border-radius:8px}
+.btn:disabled{opacity:.55;cursor:default}
+.btn.full{width:100%;margin-top:14px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.chip{background:#fff;border:1px solid var(--linea);border-radius:999px;padding:7px 12px;font-size:13px;font-weight:600}
+.chip b{color:var(--vino)}
+.toolbar{display:grid;gap:8px;grid-template-columns:1fr;margin-bottom:12px}
+.toolbar .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.toolbar .row3{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.g{background:#fff;border:1px solid var(--linea);border-left:4px solid var(--oro);border-radius:12px;padding:12px;margin-bottom:10px}
+.ghead{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.ghead .name{font-weight:700;font-size:16px}
+.tag{font-size:12px;font-weight:700;white-space:nowrap;border-radius:999px;padding:3px 9px;background:#f4efe4;border:1px solid var(--linea)}
+.tag[data-s="confirmado"]{background:#e7f4e9;color:#1f6b30;border-color:#bfe0c6}
+.tag[data-s="no_asiste"]{background:#fbe9e9;color:#8B3232;border-color:#efc9c9}
+.tag[data-s="tal_vez"]{background:#fdf5e2;color:#8a6a12;border-color:#eddfb6}
+.meta{font-size:13px;color:#5c5348;margin-top:5px;word-break:break-word}
+.meta.sub{color:#8a7f72;font-size:12px}
+.acts{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+.muted{color:#8a7f72;font-size:14px}
+.err{color:#b3261e;font-size:13px;margin:8px 0 0;min-height:16px}
+.modal{position:fixed;inset:0;background:rgba(43,35,32,.55);display:flex;align-items:flex-end;justify-content:center;padding:0;z-index:20}
+.modalbox{width:100%;max-width:520px;border-radius:16px 16px 0 0;max-height:92vh;overflow:auto}
+.modalbox h3{margin:0 0 4px;font-size:17px;color:var(--vino)}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+@media(min-width:700px){
+  .modal{align-items:center;padding:20px}
+  .modalbox{border-radius:14px}
+  .toolbar{grid-template-columns:2fr 1fr 1fr}
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>💒 Panel Invitados <em>· boda</em></h1>
+  <button class="btn ghost mini" id="btnOut" hidden>Salir</button>
+</header>
+
+<div class="wrap">
+  <div id="login" class="card" style="max-width:420px;margin:24px auto">
+    <h3 style="margin:0 0 6px;color:var(--vino)">Acceso al panel</h3>
+    <p class="muted" style="margin:0">Ingresa la contraseña del panel para gestionar los invitados.</p>
+    <label for="pass">Contraseña</label>
+    <input id="pass" type="password" autocomplete="current-password" />
+    <p class="err" id="loginErr"></p>
+    <button class="btn full" id="btnLogin">Entrar</button>
+  </div>
+
+  <div id="app" hidden>
+    <div class="chips" id="chips"></div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="toolbar">
+        <input id="q" placeholder="Buscar por nombre, teléfono o correo" />
+        <select id="fStatus">
+          <option value="todos">Todos los estados</option>
+          <option value="confirmado">✅ Confirmado</option>
+          <option value="tal_vez">🤔 Tal vez</option>
+          <option value="no_asiste">❌ No asiste</option>
+          <option value="sin_responder">⏳ Sin responder</option>
+        </select>
+        <select id="fStage">
+          <option value="todos">Todas las etapas</option>
+        </select>
+      </div>
+      <div class="toolbar" style="grid-template-columns:1fr 1fr 1fr">
+        <button class="btn alt" id="btnNew">➕ Nuevo</button>
+        <button class="btn" id="btnAll">📨 Invitar pendientes</button>
+        <button class="btn ghost" id="btnReload">🔄 Ver</button>
+      </div>
+      <p class="muted" id="count" style="margin:10px 0 0"></p>
+    </div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modalbox card">
+    <h3 id="mTitle">Editar invitado</h3>
+    <label for="fName">Nombre</label>
+    <input id="fName" />
+    <label for="fPhone">Teléfono (WhatsApp)</label>
+    <input id="fPhone" inputmode="tel" placeholder="+56 9 1234 5678" />
+    <label for="fEmail">Correo (opcional)</label>
+    <input id="fEmail" type="email" />
+    <label for="fCupo">Cupo de acompañantes (0-5)</label>
+    <input id="fCupo" type="number" min="0" max="5" step="1" value="0" />
+    <p class="err" id="mErr"></p>
+    <div class="row">
+      <button class="btn ghost" id="mCancel">Cancelar</button>
+      <button class="btn" id="mSave">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var TK='weddingPanelToken';
+var S={guests:[],stats:null,q:'',st:'todos',sg:'todos',edit:null};
+var RSVP={confirmado:['✅','Confirmado'],tal_vez:['🤔','Tal vez'],no_asiste:['❌','No asiste'],sin_responder:['⏳','Sin responder']};
+var STAGES={nuevo:'Sin invitación',invitacion_enviada:'Invitación enviada',confirmado:'Confirmado',no_asistira:'No asistirá',tal_vez:'Tal vez'};
+function $(i){return document.getElementById(i);}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function hdr(){var h={'Content-Type':'application/json'};var t=localStorage.getItem(TK);if(t){h['Authorization']='Bearer '+t;}return h;}
+function send(path,method,body){return fetch(path,{method:method||'GET',headers:hdr(),body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().catch(function(){return{};}).then(function(j){if(!r.ok){var e=new Error(j.error||('HTTP '+r.status));e.status=r.status;throw e;}return j;});});}
+function find(ph){for(var i=0;i<S.guests.length;i++){if(S.guests[i].phone===ph)return S.guests[i];}return null;}
+function stageLabel(s){return STAGES[s]||s||'—';}
+function login(){
+  var p=$('pass').value;$('loginErr').textContent='';$('btnLogin').disabled=true;
+  fetch('/panel/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'Error');return j;});}).then(function(j){localStorage.setItem(TK,j.token);$('pass').value='';showApp();}).catch(function(e){$('loginErr').textContent=e.message;}).then(function(){$('btnLogin').disabled=false;});
+}
+function showApp(){$('login').hidden=true;$('app').hidden=false;$('btnOut').hidden=false;load();}
+function logout(){localStorage.removeItem(TK);$('app').hidden=true;$('login').hidden=false;$('btnOut').hidden=true;}
+function load(){
+  $('list').innerHTML='<p class="muted">Cargando…</p>';
+  send('/panel/api/data').then(function(d){S.guests=d.guests||[];S.stats=d.stats||null;render();}).catch(function(e){if(e.status===401){logout();return;}$('list').innerHTML='<p class="err">Error: '+esc(e.message)+'</p>';});
+}
+function chip(label,val){return '<span class="chip">'+label+': <b>'+val+'</b></span>';}
+function countStatus(s){var n=0;for(var i=0;i<S.guests.length;i++){if(S.guests[i].rsvpStatus===s)n++;}return n;}
+function render(){
+  var st=S.stats||{};
+  $('chips').innerHTML=chip('✅ Confirmados',st.confirmed||0)+chip('🤔 Tal vez',st.maybe||0)+chip('❌ No asisten',st.declined||0)+chip('👥 Asistentes (con acompañantes)',st.totalAsistentes||0)+chip('⏳ Sin responder (invitados)',countStatus('sin_responder'))+chip('📋 Invitados en lista',S.guests.length);
+  var sel=$('fStage');var cur=sel.value;
+  var stages={};for(var i=0;i<S.guests.length;i++){stages[S.guests[i].stage||'nuevo']=1;}
+  var html='<option value="todos">Todas las etapas</option>';
+  Object.keys(stages).sort().forEach(function(k){html+='<option value="'+esc(k)+'">'+esc(stageLabel(k))+'</option>';});
+  sel.innerHTML=html;sel.value=cur||'todos';
+  renderList();
+}
+function filtered(){
+  var q=S.q.toLowerCase();
+  return S.guests.filter(function(g){
+    if(S.st!=='todos'&&g.rsvpStatus!==S.st)return false;
+    if(S.sg!=='todos'&&(g.stage||'nuevo')!==S.sg)return false;
+    if(!q)return true;
+    return (g.name||'').toLowerCase().indexOf(q)>=0||(g.phone||'').indexOf(q)>=0||(g.email||'').toLowerCase().indexOf(q)>=0;
+  });
+}
+function card(g){
+  var r=RSVP[g.rsvpStatus]||RSVP.sin_responder;
+  var c='<div class="g" data-phone="'+esc(g.phone)+'">';
+  c+='<div class="ghead"><span class="name">'+esc(g.name||'(sin nombre)')+'</span><span class="tag" data-s="'+g.rsvpStatus+'">'+r[0]+' '+r[1]+'</span></div>';
+  c+='<div class="meta">📱 '+esc(g.phone)+(g.email?' · 📧 '+esc(g.email):'')+' · 👥 cupo: '+(g.acompanantes==null?'—':g.acompanantes)+(g.coupleId?' · 👫 pareja'+(g.partnerPhone?' ('+esc(g.partnerPhone)+')':''):'')+'</div>';
+  c+='<div class="meta sub">'+esc(stageLabel(g.stage))+' · envíos: '+(g.templatesSent||0)+(g.rsvp?' · RSVP: '+esc(g.rsvp):'')+(g.rsvpNotas?' · '+esc(g.rsvpNotas):'')+'</div>';
+  c+='<div class="acts"><button class="btn mini" data-act="edit" data-phone="'+esc(g.phone)+'">✏️ Editar</button>';
+  c+='<button class="btn mini alt" data-act="inv" data-phone="'+esc(g.phone)+'">📨 Invitar</button>';
+  c+='<button class="btn mini ghost" data-act="del" data-phone="'+esc(g.phone)+'">🗑️ Eliminar</button></div></div>';
+  return c;
+}
+function renderList(){
+  var list=filtered();
+  $('count').textContent='Mostrando '+list.length+' de '+S.guests.length+' invitados';
+  if(!list.length){$('list').innerHTML='<p class="muted">Sin resultados.</p>';return;}
+  var html='';for(var i=0;i<list.length;i++){html+=card(list[i]);}
+  $('list').innerHTML=html;
+}
+function openModal(ph){
+  S.edit=ph;$('mErr').textContent='';
+  if(ph){
+    var g=find(ph);if(!g)return;
+    $('mTitle').textContent='Editar invitado';
+    $('fName').value=g.name||'';$('fPhone').value=g.phone||'';$('fEmail').value=g.email||'';
+    $('fCupo').value=(g.acompanantes==null?0:g.acompanantes);
+  }else{
+    $('mTitle').textContent='Nuevo invitado';
+    $('fName').value='';$('fPhone').value='';$('fEmail').value='';$('fCupo').value=0;
+  }
+  $('modal').hidden=false;
+}
+function closeModal(){$('modal').hidden=true;S.edit=null;}
+function save(){
+  var name=$('fName').value.trim(),phone=$('fPhone').value.trim(),email=$('fEmail').value.trim(),cupo=$('fCupo').value;
+  $('mErr').textContent='';
+  if(!name){$('mErr').textContent='Falta el nombre';return;}
+  if(!phone){$('mErr').textContent='Falta el teléfono';return;}
+  $('mSave').disabled=true;
+  function done(){$('mSave').disabled=false;closeModal();load();}
+  function fail(e){$('mSave').disabled=false;$('mErr').textContent=e.message;}
+  if(S.edit===null){
+    send('/panel/api/guest','POST',{name:name,phone:phone,email:email,acompanantes:cupo}).then(done).catch(fail);
+    return;
+  }
+  var g=find(S.edit);
+  if(!g){fail(new Error('Invitado no encontrado'));return;}
+  var ops=[];
+  if(name!==(g.name||''))ops.push(['name',name]);
+  if(phone!==g.phone)ops.push(['phone',phone]);
+  if(email!==(g.email||''))ops.push(['email',email]);
+  if(String(cupo)!==String(g.acompanantes==null?'':g.acompanantes))ops.push(['acompanantes',cupo]);
+  if(!ops.length){done();return;}
+  var cur=S.edit;
+  function run(i){
+    if(i>=ops.length){done();return;}
+    send('/panel/api/guest/edit','POST',{phone:cur,field:ops[i][0],value:ops[i][1]}).then(function(j){if(ops[i][0]==='phone'){cur=j.guest.phone;}run(i+1);}).catch(fail);
+  }
+  run(0);
+}
+function del(ph){
+  var g=find(ph);if(!g)return;
+  if(!confirm('¿Eliminar a '+g.name+'? Se borra también su RSVP.'))return;
+  if(!confirm('Confirma de nuevo: eliminar definitivamente a '+g.name+' ('+ph+').'))return;
+  send('/panel/api/guest/'+encodeURIComponent(ph),'DELETE').then(function(){load();}).catch(function(e){alert('Error: '+e.message);});
+}
+function invite(ph){
+  var g=find(ph);if(!g)return;
+  if(!confirm('¿Enviar la invitación (save-the-date) a '+g.name+'?'))return;
+  send('/panel/api/invite','POST',{phone:ph}).then(function(){alert('Envío solicitado. El resultado queda registrado en Slack.');load();}).catch(function(e){alert('Error: '+e.message);});
+}
+function inviteAll(){
+  var pend=S.guests.filter(function(g){return (g.stage||'nuevo')==='nuevo';}).length;
+  if(!confirm('¿Enviar la invitación a TODOS los pendientes ('+pend+')?'))return;
+  if(!confirm('Confirma de nuevo: se enviarán WhatsApp reales a '+pend+' invitados.'))return;
+  send('/panel/api/invite','POST',{all:true}).then(function(){alert('Batch solicitado. Revisa Slack para el resultado.');}).catch(function(e){alert('Error: '+e.message);});
+}
+$('btnLogin').onclick=login;
+$('pass').addEventListener('keydown',function(e){if(e.key==='Enter')login();});
+$('btnOut').onclick=logout;
+$('btnReload').onclick=load;
+$('btnNew').onclick=function(){openModal(null);};
+$('btnAll').onclick=inviteAll;
+$('mCancel').onclick=closeModal;
+$('mSave').onclick=save;
+$('q').addEventListener('input',function(e){S.q=e.target.value;renderList();});
+$('fStatus').addEventListener('change',function(e){S.st=e.target.value;renderList();});
+$('fStage').addEventListener('change',function(e){S.sg=e.target.value;renderList();});
+$('list').addEventListener('click',function(e){var b=e.target.closest('button[data-act]');if(!b)return;var ph=b.getAttribute('data-phone');var a=b.getAttribute('data-act');if(a==='edit')openModal(ph);else if(a==='del')del(ph);else if(a==='inv')invite(ph);});
+if(localStorage.getItem(TK)){showApp();}
+</script>
+</body>
+</html>`;
+
+app.get('/panel', (_req, res) => {
+  res.type('html').send(PANEL_HTML);
+});
+
 // ── Código Novios (codigonovios.cl) — Fase C1 ───────────────
 // CORS: Bluehost (sitio estático) llama a esta API desde el browser
 // F1: agregado PUT — sin él, "Guardar datos"/"Cambiar contraseña" del panel
